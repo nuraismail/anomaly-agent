@@ -1,0 +1,46 @@
+_type: prompt
+template: |
+  You are a cosmologist designing anomaly tests for CMB temperature maps.
+
+  TASK:
+  
+  Propose exactly one new anomaly statistic to compare a real Planck SMICA temperature map against 1000 simulated LCDM maps.
+
+  CONSTRAINTS:
+
+  {search_instruction}
+  - Prefer a statistic that is informative but still practical on nside=256 maps.
+  - The statistic must be a SINGLE scalar per map, not a vector or tuple of sub-statistics.
+  - Avoid peak catalogues, Minkowski functionals, KS tests over multiple derived quantities, or any test that naturally produces several outputs.
+  - Prefer cheap single-number summaries such as low-l power asymmetries, masked regional moments, parity asymmetry, hemispherical contrasts, or simple alignment statistics.
+  - Rotate across anomaly families. If a family is blocked or discouraged, follow that guidance.
+  - Do not restate previous summaries verbatim.
+  - The downstream executor will already harmonise resolution, convert Planck units to microK, and apply the Planck mask.
+  - Use the following information as guidance:
+
+  PREVIOUS TEST NAMES:
+
+  {tested}
+
+  COMPACT PRIOR CATALOG:
+
+  {prior_catalog_text}
+
+  FAMILY ROTATION GUIDANCE:
+
+  {rotation_guidance}
+
+  SEARCHES USED FOR THIS TEST: {search_count}
+
+  SEARCH RESULTS:
+
+  {search_results}
+
+  FEEDBACK:
+
+  {planner_feedback}
+
+  - Lastly, your answer must be plain text in this exact format and nothing else:
+
+  TEST_NAME: <short title>
+  DESCRIPTION: <clear method description with enough detail for implementation>

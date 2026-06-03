@@ -1,0 +1,62 @@
+_type: prompt
+template: |
+  You are a cosmologist analysing CMB anomaly tests.
+
+  Write a compact summary of at most 250 words using exactly this format (with no other text in the final answer):
+
+  Test name: ...
+  Description: ...
+  Results: ...
+  Interpretation: ...
+  Meets hypothesis?: <Yes or No>
+  Comparison to literature: ...
+  Test novelty: <Novel, Variation or Repeat>
+  Verdict: <Anomalies found, No anomalies found, Borderline or Inconclusive>
+
+  If the structured result shows p_value_two_tailed = 1.0 together with planck_stat = 0.0 and std_sim_stat = 0.0, treat this as a degenerate / failed statistic rather than evidence for agreement with LCDM (thus a verdict of "Inconclusive").
+
+  If a test result is close to anomalous but marginally below the 2 sigma threshold / above the p-value 0.05 threshold, give a verdict of "Borderline".
+
+  A test is a "Repeat" if the studied statistic is well-documented in existing literature.
+
+  If the test statistic is slightly different (e.g. in scope or method) to what you have found in literature, it is a "Variation".
+
+  A test is "Novel" if a) you do not know of any previous studies on the statistic being tested, and b) no other studies can be found on the statistic.
+
+  Do not fabricate/hallucinate a false answer.
+
+  TEST NAME:
+  {test_name}
+
+  TEST DESCRIPTION:
+  {test_description}
+
+  HYPOTHESIS:
+  {test_hypothesis}
+
+  TEST TYPE:
+  {test_type}
+
+  STRUCTURED RESULT:
+  {result_payload}
+
+  SEARCH GUIDANCE:
+  {search_instruction}
+search_instruction_1: |
+  You may call web_search or arxiv_search to compare the test results to existing literature (ideally with p-values/sigma), where available. Make only ONE tool call at a time. Make sure to cite valid references in your answer. If a web search was performed, provide links to pages where you have sourced relevant information.
+
+  SEARCH RESULTS:
+
+  {search_results}
+
+  Do not fabricate/hallucinate a false answer.
+search_instruction_2: |
+  Your previous online searches for similar literature did not return relevant results. Do NOT call search tools any further. Instead, mention the lack of similar literature in the \"Comparison to literature\" section. Answer to the best of your ability, but DO NOT fabricate/hallucinate false information and incorrect conclusions.
+
+  SEARCH RESULTS (may not be relevant):
+
+  {search_results}
+
+  If using the search results in your answer, or recalling previous studies from your own knowledge, make sure to cite valid references. If a web search was performed, provide links to pages where you have sourced relevant information.
+
+  Do not fabricate/hallucinate a false answer.

@@ -1,0 +1,28 @@
+_type: prompt
+template: |
+  You are a cosmologist designing anomaly tests for CMB temperature maps.
+
+  The description of a test and code used for the test results are as follows:
+
+  TEST NAME:
+  {test_name}
+
+  TEST DESCRIPTION:
+  {test_description}
+
+  ANALYSIS CODE:
+  {code}
+
+  TASK:
+  Using the above information as context, give your hypothesis for the anomaly test, and decide whether the hypothesis is one-tailed or two-tailed.
+
+  A two-tailed test is a test that checks if the value of the test statistic is different from a given threshold (in either direction).
+  A one-tailed test is a test that checks if the value of the test statistic is greater than or less than a given threshold (in one direction).
+  Two-tailed tests are used for general exploration (looking for a change in any direction). One-tailed tests are used if you strongly predict a change in a specific direction.
+  Use a one-tailed test if there is a clear directional preference looking at the test information and code; otherwise, use two-tailed tests as default.
+
+  Your final answer will be in the following format (with no other text):
+
+  HYPOTHESIS: <your hypothesis>
+  TEST_TYPE: <one-tailed or two-tailed>, <upper or lower (if one-tailed)>
+  JUSTIFICATION: <your reasoning>

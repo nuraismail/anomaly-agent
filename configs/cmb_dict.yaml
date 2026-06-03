@@ -1,0 +1,30 @@
+families: ["parity", "alignment", "correlation", "hemispherical", "variance", "direction", "power"]
+stat_forms: ["ratio", "difference", "contrast", "coefficent", "index", "angle"]
+comps: ["dipole", "quadrupole", "octupole", "ecliptic", "galactic", "hemisphere", "quadrant"]
+stopwords: [
+        "the", "a", "an", "of", "and", "or", "to", "for", "with", "using", "masked",
+        "low", "statistic", "index", "contrast", "ratio", "coefficient", "test",
+        "mode", "modes", "power", "asymmetry", "correlation", "cross", "temperature",
+]
+redundant_keys: [
+        "planck_stat",
+        "p_value",
+        "p_value_two_tailed",
+        "p_value_two_sided",
+        "two_tailed_p_value",
+        "two_sided_p_value",
+        "p_two_tailed",
+        "p_two_sided",
+        "sigma",
+        "n_sims",
+        "n_simulations",
+        "mean_sim",
+        "mean_sim_stat",
+        "sim_mean",
+        "std_sim",
+        "std_sim_stat",
+        "sim_std",
+        "median_sim",
+        "median_sim_stat",
+        "sim_median",
+]

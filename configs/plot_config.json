@@ -1,0 +1,14 @@
+{
+    "figure.figsize": [7.2, 4.8],
+    "figure.dpi": 150,
+    "savefig.dpi": 300,
+    "font.family": "DejaVu Serif",
+    "axes.titlesize": 14,
+    "axes.labelsize": 12,
+    "xtick.labelsize": 10,
+    "ytick.labelsize": 10,
+    "legend.fontsize": 10,
+    "axes.spines.top": true,
+    "axes.spines.right": true,
+    "axes.grid": false
+}

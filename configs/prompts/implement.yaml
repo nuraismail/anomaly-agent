@@ -1,0 +1,49 @@
+_type: prompt
+template: |
+  You are implementing a CMB anomaly statistic.
+
+  TEST NAME:
+  {test_name}
+
+  TEST DESCRIPTION:
+  {test_description}
+
+  EXECUTION CONTEXT:
+  - analyze_map(m) will receive a one-dimensional numpy array.
+  - Pixels outside the mask are already set to np.nan.
+  - The Planck map has already been downgraded to the simulation nside and converted to microK.
+  - Your code must be lightweight enough to run on around 1000 simulated maps.
+
+  REQUIREMENTS:
+  - You MUST call register_analysis exactly once.
+  - Pass only Python code to register_analysis.
+  - Do not use markdown fences.
+  - Define:
+      def analyze_map(m): ...
+  - Set:
+      test_description = "..."
+  - You SHOULD define:
+      def summarize_results(planck_stat, sim_results): ...
+  - summarize_results should return a dict with any useful derived interpretation fields for this specific test.
+  - summarize_results may include a nested dict plot_spec with keys such as kind, title, xlabel, ylabel, bins, and caption.
+  - Allowed plot_spec kinds are: histogram, ecdf, rank.
+  - If no plot_spec is provided, the notebook will auto-select a plot type.
+  - Use np.isfinite to ignore masked pixels represented by np.nan.
+  - If you use healpy transforms such as hp.anafast, hp.map2alm, or spherical-harmonic operations, you MUST first replace masked np.nan pixels with a finite fill value such as 0.0. Never pass arrays containing np.nan directly into healpy.
+  - Return a single finite float from analyze_map. Do not return np.nan or inf.
+  - DO NOT return tuples, lists, dicts, or multiple statistics.
+  - DO NOT use scipy.stats.ks_2samp or similar multi-sample tests inside analyze_map or summarize_results.
+  - DO NOT scan every pixel in Python if there is a cheaper vectorized alternative.
+  - If the statistic collapses to the same constant value on Planck and a few simulations, redesign it.
+
+  PRIOR CODE, IF ANY:
+  {previous_code}
+
+  {guidance}
+additional_template: |
+  The previous implementation failed during registration or execution.
+
+  ERROR TRACEBACK:
+  {previous_error}
+
+  Fix the code and call register_analysis again.
