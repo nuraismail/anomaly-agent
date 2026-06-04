@@ -200,6 +200,7 @@ class AnomalyAgent:
         current_test_description: str
         best_sigma: float
         node_retry: bool
+        python_env: dict
     
     # state dependent functions
 
@@ -310,14 +311,29 @@ class AnomalyAgent:
         returns:
             str: A message indicating the outcome/output of the analysis.
         """
-        if self.python_env.get("analyze_map") is None:
+
+        local_env = {}
+        safe_globals = {"np": np, "hp": hp}
+
+        try:
+            test_codes = state.get("code", [None])
+            if not test_codes or test_codes[-1].content is None:
+                self.python_env["last_error"] = "No code found in state to execute."
+                return "ERROR\n\nNo code found in state to execute."
+            exec(test_codes[-1].content, safe_globals, local_env)
+        except Exception:
+            self.python_env["last_error"] = traceback.format_exc()
+            return f"ERROR\n\n{self.python_env['last_error']}"
+
+        if "analyze_map" not in local_env:
             self.python_env["last_error"] = "No registered analyze_map(m) function found."
             return "ERROR\n\nNo registered analyze_map(m) function found."
+        else:
+            stat_fn = local_env["analyze_map"]
+            summary_fn = local_env.get("summarize_results")
 
         output_dir = self.current_output_dir(state)
         saved_test_index = self.next_saved_test_index(state)
-        stat_fn = self.python_env["analyze_map"]
-        summary_fn = self.python_env.get("summarize_results")
         log = io.StringIO()
         self.python_env["last_result"] = None
         self.python_env["last_sigma"] = None
@@ -479,9 +495,6 @@ class AnomalyAgent:
             "test_signature": extract_test_signature(state["current_test_name"], state["current_test_description"]),
         }
 
-        # with open(output_dir / "result_summary.json", "w", encoding="utf-8") as f:
-        #     json.dump(result_payload, f, indent=2, default=str)
-
         self.python_env["last_error"] = None
         self.python_env["last_sigma"] = sigma
         self.python_env["last_result"] = result_payload
@@ -511,7 +524,7 @@ class AnomalyAgent:
             self.python_env["summarize_results"] = None
             self.python_env["test_description"] = None
             output_msg = f"ERROR\n\n{self.python_env['last_error']}"
-            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True})
+            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True, "python_env": self.python_env.copy()})
 
         if "analyze_map" not in local_env:
             self.python_env["last_error"] = "analyze_map(m) was not defined."
@@ -519,7 +532,7 @@ class AnomalyAgent:
             self.python_env["summarize_results"] = None
             self.python_env["test_description"] = None
             output_msg = "ERROR\n\nanalyze_map(m) was not defined."
-            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True})
+            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True, "python_env": self.python_env.copy()})
 
         analyze_fn = local_env["analyze_map"]
         summary_fn = local_env.get("summarize_results")
@@ -544,7 +557,7 @@ class AnomalyAgent:
             self.python_env["summarize_results"] = None
             self.python_env["test_description"] = None
             output_msg = f"ERROR\n\n{self.python_env['last_error']}"
-            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True})
+            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True, "python_env": self.python_env.copy()})
 
         try:
             sim_iter = self.iter_simulation_maps()
@@ -595,7 +608,7 @@ class AnomalyAgent:
 
         except RuntimeError as e:
             if "Restarting test" in str(e):
-                print(f"ERROR\n\nTime to process Planck map exceeded {probe_max_time * 60} seconds. The time to process the batch of simulated maps may exceed {self.test_config["max_test_minutes"]} as a result.")
+                print(f"ERROR\n\nTime to process Planck map exceeded {probe_max_time * 60} seconds. The time to process the batch of simulated maps may exceed {self.test_config["max_test_minutes"]} minutes as a result.")
                 raise
             else:
                 raise
@@ -605,14 +618,14 @@ class AnomalyAgent:
             self.python_env["summarize_results"] = None
             self.python_env["test_description"] = None
             output_msg = f"ERROR\n\n{self.python_env['last_error']}"
-            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True})
+            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True, "python_env": self.python_env.copy()})
         except Exception:
             self.python_env["last_error"] = traceback.format_exc()
             self.python_env["analyze_map"] = None
             self.python_env["summarize_results"] = None
             self.python_env["test_description"] = None
             output_msg = f"ERROR\n\nPreflight validation failed.\n\n{self.python_env['last_error']}"
-            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True})
+            return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True, "python_env": self.python_env.copy()})
 
         self.python_env["analyze_map"] = analyze_fn
         self.python_env["summarize_results"] = summary_fn
@@ -764,7 +777,7 @@ class AnomalyAgent:
     def implement_node(self, state: State):
         test_name = state['current_test_name']
         test_description = state['current_test_description']
-        previous_error = self.python_env.get("last_error")
+        previous_error = self.python_env.get("last_error", None) or state.get("python_env", {}).get("last_error", None)
 
         if previous_error:
             previous_code = self.retrieve_state(state, "code", max_entries=1)
@@ -849,6 +862,7 @@ class AnomalyAgent:
             "best_sigma": max(float(state.get("best_sigma", 0.0)), float(sigma)),
             "node_retry": output.startswith("ERROR"),
             "search_results": "",
+            "python_env": {},
         }
 
     def summary_node(self, state: State):
@@ -907,7 +921,7 @@ class AnomalyAgent:
                 "test_summary": summary,
                 "tested_anomalies": tested,
                 "search_count": 0,
-                "node_retry": False
+                "node_retry": False,
             }
     
     # routing
@@ -930,7 +944,7 @@ class AnomalyAgent:
             return "implement"
         
     def post_register_route(self, state: State):
-        if state.get("node_retry"):
+        if self.python_env.get("last_error", None):
             return "implement"
         else:
             return "hypothesis"
@@ -1184,6 +1198,6 @@ if __name__ == "__main__":
     # model = "openai/gpt-5.5"
     # model = "openrouter/owl-alpha"
     model = "poolside/laguna-m.1:free"
-    thread_id = "test_run_4"
+    thread_id = "test_run_5"
     agent = AnomalyAgent(model, thread_id)
     agent()

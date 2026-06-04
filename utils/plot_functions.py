@@ -144,9 +144,9 @@ def plot_results(planck_stat: float, sim_results: np.ndarray, output_dir: Path, 
         ax.grid(alpha=0.18, linewidth=0.6)
 
         if kind == "ecdf":
-            plot_ecdf(ax, planck_stat, sim_results, summary)
+            plot_ecdf(ax, planck_stat, sim_results)
         elif kind == "rank":
-            plot_rank(ax, planck_stat, sim_results, summary)
+            plot_rank(ax, planck_stat, sim_results)
         else:
             plot_histogram(ax, planck_stat, sim_results, summary, test_config)
 
