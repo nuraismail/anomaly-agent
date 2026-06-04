@@ -2,7 +2,6 @@ import file_paths
 import yaml
 import json
 import re
-import os
 from pathlib import Path
 
 def extract_test_signature(name: str, description: str):
@@ -50,31 +49,39 @@ def extract_test_signature(name: str, description: str):
     }
 
 def build_prior_catalog(tests_dir):
-    directories = [x[0] for x in os.walk(tests_dir)]
-
     catalog = []
 
-    for dir in directories[1:]:
-        out_dir = Path(dir) / 'result_summary.json'
+    for out_dir in sorted(Path(tests_dir).glob("*/result_summary.json")):
+        try:
+            with open(out_dir, 'r', encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError):
+            continue
 
-        with open(out_dir, 'r+') as f:
-            data = json.load(f)
-            name = str(data.get("test_name", "")).strip()
-            description = str(data.get("test_description", "")).strip()
+        if not isinstance(data, dict):
+            continue
 
-            if not name:
-                continue
+        name = str(data.get("test_name", "")).strip()
+        description = str(data.get("test_description", "")).strip()
 
-            signature = extract_test_signature(name, description)
+        if not name:
+            summary = data.get("test_summary", {})
+            if isinstance(summary, dict):
+                name = str(summary.get("Test name", "")).strip()
+                description = description or str(summary.get("Description", "")).strip()
 
-            catalog.append({
-                "name": name,
-                "family": signature["family"],
-                "stat_form": signature["stat_form"],
-                "components": signature["components"],
-                "tokens": signature["tokens"],
-                "sigma": data.get("sigma"),
-            })
+        if not name:
+            continue
+
+        signature = extract_test_signature(name, description)
+
+        catalog.append({
+            "name": name,
+            "family": signature["family"],
+            "stat_form": signature["stat_form"],
+            "components": signature["components"],
+            "tokens": signature["tokens"],
+        })
 
     return catalog 
 
@@ -99,10 +106,8 @@ def compact_catalog_text(tests_dir, max_items: int = 12):
     
     for entry in catalog[-max_items:]:
         comp = ", ".join(entry["components"]) if entry["components"] else "none"
-        sigma = entry["sigma"]
-        sigma_text = f"{float(sigma):.2f}" if isinstance(sigma, (int, float)) else "NA"
         lines.append(
-            f"- {entry['name']} | family={entry['family']} | form={entry['stat_form']} | components={comp} | sigma={sigma_text}"
+            f"- {entry['name']} | family={entry['family']} | form={entry['stat_form']} | components={comp}"
         )
 
     return "\n".join(lines)
