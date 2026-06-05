@@ -5,8 +5,9 @@ planck_map_file = "COM_CMB_IQU-smica_2048_R3.00_full.fits"
 
 cmb_dict_file = "cmb_dict.yaml"
 
-plot_config_file = "plot_config.json"
-test_config_file = "test_config.json"
+plot_config_file = "plot_config.yaml"
+test_config_file = "test_config.yaml"
+agent_config_file = "agent_config.yaml"
 
 planner_file = "planner.yaml"
 implement_file = "implement.yaml"
@@ -34,6 +35,7 @@ cmb_dict_dir = configs_dir / cmb_dict_file
 
 plot_config_dir = configs_dir / plot_config_file
 test_config_dir = configs_dir / test_config_file
+agent_config_dir = configs_dir / agent_config_file
 
 planner_dir = prompts_dir / planner_file
 implement_dir = prompts_dir / implement_file

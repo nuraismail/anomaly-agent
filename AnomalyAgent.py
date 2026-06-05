@@ -2,7 +2,7 @@
 
 # user-defined modules
 
-from utils.string_utils import cleanup_output_dir, parse_test_metadata, text_to_dict
+from utils.string_utils import cleanup_output_dir, message_content_to_text, parse_test_metadata, text_to_dict
 from utils.summary_utils import build_default_summary, compact_summary
 from utils.TeeIO import tee_stdout
 from utils.family_novelty import extract_test_signature, compact_catalog_text, rotation_guidance_text, novelty_check, family_rotation_check
@@ -30,6 +30,7 @@ import traceback
 import time
 import itertools
 import arxiv
+import argparse
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, MessagesState, StateGraph, add_messages
 from langgraph.types import RetryPolicy, Command
@@ -55,9 +56,19 @@ class AnomalyAgent:
     args:
         model (str): Name of LLM model (available on OpenRouter)
         thread_id (str, optional): Label for conversation thread (used to maintain persistence)
+        base_url (str, optional): OpenAI-compatible API base URL
+        reasoning_effort (str, optional): Reasoning effort passed to supported models
     """
     
-    def __init__(self, model:str, thread_id:str="thread_1"):
+    def __init__(
+        self,
+        model: str,
+        thread_id: str = "thread_1",
+        base_url: str = "https://openrouter.ai/api/v1",
+        reasoning_effort: str | None = None,
+        test_config: dict | None = None,
+        plot_config: dict | None = None,
+    ):
         
         # initialise variables
         
@@ -68,6 +79,8 @@ class AnomalyAgent:
             raise ValueError("OPENROUTER_API_KEY is missing. Set it in environment variables/.env file.")
 
         self.thread_id = thread_id
+        self.base_url = base_url
+        self.reasoning_effort = reasoning_effort
 
         self.chain = None
         self.previous_state = None
@@ -83,11 +96,8 @@ class AnomalyAgent:
         self.test_output_dir = Path(self.output_root) / (Path(self.checkpoint_db_path).stem / Path(self.thread_id))
         self.test_output_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(file_paths.test_config_dir) as f:
-            self.test_config = json.load(f)
-
-        with open(file_paths.plot_config_dir) as f:
-            self.plot_config = json.load(f)
+        self.test_config = dict(test_config) if test_config is not None else load_yaml_config(file_paths.test_config_dir)
+        self.plot_config = dict(plot_config) if plot_config is not None else load_yaml_config(file_paths.plot_config_dir)
 
         # initialise checkpointer
 
@@ -128,13 +138,16 @@ class AnomalyAgent:
         returns:
             ChatOpenAI: model instance
         """
+        kwargs = {}
+        if self.reasoning_effort:
+            kwargs["reasoning"] = {"effort": self.reasoning_effort}
+
         return ChatOpenAI(
             model=self.model,
-            base_url="https://openrouter.ai/api/v1",
+            base_url=self.base_url,
             api_key=self.api_key,
-            reasoning={
-            "effort": "xhigh",
-        })
+            **kwargs,
+        )
     
     def to_python_types(self, value):
         """
@@ -223,7 +236,9 @@ class AnomalyAgent:
         if not values:
             return ""
         else:
-            return "\n\n".join(msg.content for msg in values if getattr(msg, "content", ""))
+            return "\n\n".join(
+                text for text in (message_content_to_text(getattr(msg, "content", msg)) for msg in values) if text
+            )
 
     def next_saved_test_index(self, state: State, test_success:bool=False) -> int:
         """
@@ -666,11 +681,24 @@ class AnomalyAgent:
             Command: A command to update the agent's state with the search results.
         """
 
-        results = DuckDuckGoSearchResults(num_results=5).run(query)
         id = runtime.state["search_query"][-1].tool_calls[0]['id']
-        search_count = runtime.state["search_count"]
+        search_count = runtime.state.get("search_count", 0)
 
-        return Command(update={"search_results": ['Query: ' + query + '\n\n' + 'Results:\n\n' + results + '\n'], "search_query": [ToolMessage("Success", tool_call_id=id)], "search_count": search_count + 1})
+        try:
+            results = DuckDuckGoSearchResults(num_results=5).run(query)
+            results_text = 'Query: ' + query + '\n\n' + 'Results:\n\n' + results + '\n'
+            tool_message = "Success"
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            results_text = (
+                'Query: ' + query + '\n\n'
+                + 'Search failed:\n\n'
+                + error + '\n\n'
+                + 'The agent should proceed without these web results or try arxiv_search if searches remain.\n'
+            )
+            tool_message = f"Search failed: {error}"
+
+        return Command(update={"search_results": [results_text], "search_query": [ToolMessage(tool_message, tool_call_id=id)], "search_count": search_count + 1})
 
     @tool
     def arxiv_search(query: str, runtime: ToolRuntime) -> Command:
@@ -683,14 +711,29 @@ class AnomalyAgent:
             Command: A command to update the agent's state with the search results.
         """
 
-        client = arxiv.Client()
-        search = arxiv.Search(query=query, max_results=3)
-        results = list(client.results(search))
-        results_str = '\n\n'.join(['\n'.join(['Title: ' + r.title, 'Published: ' + r.published.strftime('%Y/%m/%d'), 'Authors: ' + ', '.join([r.authors[i].name for i in range(len(r.authors) if len(r.authors) <= 5 else 5)]), 'Abstract: ' + r.summary]) for r in results])
         id = runtime.state["search_query"][-1].tool_calls[0]['id']
-        search_count = runtime.state["search_count"]
+        search_count = runtime.state.get("search_count", 0)
 
-        return Command(update={"search_results": ['Query: ' + query + '\n\n' + 'Results:\n\n' + results_str + '\n'], "search_query": [ToolMessage("Success", tool_call_id=id)], "search_count": search_count + 1})
+        try:
+            client = arxiv.Client(page_size=3, delay_seconds=5.0, num_retries=0)
+            search = arxiv.Search(query=query, max_results=3)
+            results = list(client.results(search))
+            results_str = '\n\n'.join(['\n'.join(['Title: ' + r.title, 'Published: ' + r.published.strftime('%Y/%m/%d'), 'Authors: ' + ', '.join([r.authors[i].name for i in range(len(r.authors) if len(r.authors) <= 5 else 5)]), 'Abstract: ' + r.summary]) for r in results])
+            if not results_str:
+                results_str = "No arXiv results returned."
+            results_text = 'Query: ' + query + '\n\n' + 'Results:\n\n' + results_str + '\n'
+            tool_message = "Success"
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            results_text = (
+                'Query: ' + query + '\n\n'
+                + 'Search failed:\n\n'
+                + error + '\n\n'
+                + 'The agent should proceed without these arXiv results or try web_search if searches remain.\n'
+            )
+            tool_message = f"Search failed: {error}"
+
+        return Command(update={"search_results": [results_text], "search_query": [ToolMessage(tool_message, tool_call_id=id)], "search_count": search_count + 1})
 
     # nodes
 
@@ -700,7 +743,8 @@ class AnomalyAgent:
         search_count = state.get("search_count", 0)
         prior_catalog_text = compact_catalog_text(self.test_output_dir)
         rotation_guidance = rotation_guidance_text(self.test_output_dir, self.test_config)
-        planner_feedback = state["messages"][-1].content if "REJECTED" in state["messages"][-1].content else ""
+        last_message_text = message_content_to_text(state["messages"][-1].content) if state.get("messages") else ""
+        planner_feedback = last_message_text if "REJECTED" in last_message_text else ""
         search_results = self.retrieve_state(state, "search_results", max_entries=3)
         msg = None
 
@@ -723,14 +767,11 @@ class AnomalyAgent:
 
         if getattr(msg, "tool_calls", None):
             return {"search_query": [msg]}
-        elif (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg.content or "query:" in msg.content) or msg.content == '')) or getattr(msg, "invalid_tool_calls", None):
+        msg_text = message_content_to_text(msg.content)
+        if (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg_text or "query:" in msg_text) or msg_text == '')) or getattr(msg, "invalid_tool_calls", None):
             return {"node_retry": True}
         else:
-            if isinstance(msg.content, list) and any(d['type'] == 'text' for d in msg.content):
-                idx = next((index for (index, d) in enumerate(msg.content) if d["type"] == "text"), None)
-                test_name, test_description = parse_test_metadata(msg.content[idx]["text"])
-            else:
-                test_name, test_description = parse_test_metadata(msg.content)
+            test_name, test_description = parse_test_metadata(msg_text)
             rotation_issue = family_rotation_check(self.test_output_dir, self.test_config, test_name, test_description)
             novelty_issue = novelty_check(self.test_output_dir, test_name, test_description)
             feedback_parts = []
@@ -826,11 +867,7 @@ class AnomalyAgent:
 
         msg = self.llm.invoke(prompt)
 
-        if isinstance(msg.content, list) and any(d['type'] == 'text' for d in msg.content):
-            idx = next((index for (index, d) in enumerate(msg.content) if d["type"] == "text"), None)
-            message = msg.content[idx]["text"]
-        else:
-            message = msg.content
+        message = message_content_to_text(msg.content)
 
         stop_markers = [
             "HYPOTHESIS",
@@ -882,7 +919,7 @@ class AnomalyAgent:
             file = yaml.safe_load(stream)
             template = file["template"]
 
-            if state.get("search_count", 0) > self.test_config["max_searches_per_test"]:
+            if state.get("search_count", 0) >= self.test_config["max_searches_per_test"]:
                 search_instruction = file["search_instruction_2"]
                 search_instruction = PromptTemplate.from_template(search_instruction)
 
@@ -901,22 +938,19 @@ class AnomalyAgent:
         msg = self.search_llm.invoke(prompt)
 
         if getattr(msg, "tool_calls", None):
-            return {"search_query": [msg], "search_count": state.get("search_count", 0) + 1}
-        elif (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg.content) or msg.content == '')) or getattr(msg, "invalid_tool_calls", None):
+            return {"search_query": [msg]}
+        msg_text = message_content_to_text(msg.content)
+        if (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg_text) or msg_text == '')) or getattr(msg, "invalid_tool_calls", None):
             return {"node_retry": True}
         else:
-            if any(d['type'] == 'text' for d in msg.content):
-                idx = next((index for (index, d) in enumerate(msg.content) if d["type"] == "text"), None)
-                summary = msg.content[idx]["text"]
-            else:
-                summary = msg.content
+            summary = msg_text
 
             tested = list(state.get("tested_anomalies", []))
             tested.append(state["current_test_name"])
 
             return {
                 "messages": [msg],
-                "test_summary": summary,
+                "test_summary": [AIMessage(content=summary)],
                 "tested_anomalies": tested,
                 "search_count": 0,
                 "node_retry": False,
@@ -961,8 +995,29 @@ class AnomalyAgent:
             print("Did not obtain correct output. Retrying...\n\n")
             return "summary"
         else:
-            out_dir = self.current_output_dir(state, test_success=True) / 'result_summary.json'
-            data = state.get("current_results", {})
+            output_dir = self.current_output_dir(state, test_success=True)
+            out_dir = output_dir / 'result_summary.json'
+            data = dict(state.get("current_results", {}) or {})
+            data.setdefault("saved_test_index", self.next_saved_test_index(state, test_success=True))
+            data.setdefault("test_name", state.get("current_test_name", ""))
+            data.setdefault("test_description", state.get("current_test_description", ""))
+            data.setdefault("test_hypothesis", self.retrieve_state(state, "test_hypothesis", max_entries=1))
+            data.setdefault("justification", self.retrieve_state(state, "justification", max_entries=1))
+            data.setdefault("planck_stat", None)
+            data.setdefault("mean_sim_stat", None)
+            data.setdefault("std_sim_stat", None)
+            data.setdefault("median_sim_stat", None)
+            data.setdefault("p_value", None)
+            data.setdefault("tail", self.retrieve_state(state, "test_type", max_entries=1))
+            data.setdefault("sigma", None)
+            data.setdefault("n_sims", None)
+            data.setdefault("plot_path", None)
+            data.setdefault("plot_pdf_path", None)
+            data.setdefault("plot_kind", None)
+            data.setdefault("output_dir", str(output_dir))
+            data.setdefault("custom_summary", {})
+            data.setdefault("analysis_code", self.retrieve_state(state, "code", max_entries=1) or None)
+            data.setdefault("test_signature", extract_test_signature(data["test_name"], data["test_description"]))
             stop_markers = [
                     "Test name",
                     "Description",
@@ -973,7 +1028,8 @@ class AnomalyAgent:
                     "Test novelty",
                     "Verdict",
                 ]
-            data["test_summary"] = text_to_dict(state["test_summary"][-1].content, stop_markers)
+            summary_text = self.retrieve_state(state, "test_summary", max_entries=1)
+            data["test_summary"] = text_to_dict(summary_text, stop_markers)
             with open(out_dir, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, default=str)
             return "__end__"
@@ -988,12 +1044,16 @@ class AnomalyAgent:
         for dir in directories[1:]:
             out_dir = Path(dir) / 'result_summary.json'
             try:
-                with open(out_dir, 'r+') as f:
+                with open(out_dir, 'r', encoding="utf-8") as f:
                     data = json.load(f)
                     summary = data.get("test_summary", None)
-                    if summary != None:
-                        tested_anomalies.append(data['test_summary']['Test name'])
-            except FileNotFoundError:
+                    if isinstance(summary, dict):
+                        test_name = summary.get("Test name") or data.get("test_name")
+                    else:
+                        test_name = data.get("test_name")
+                    if test_name:
+                        tested_anomalies.append(test_name)
+            except (FileNotFoundError, json.JSONDecodeError, TypeError):
                 continue
 
         # Initialise config - thread_id needs to be the same so that the state can persist across multiple runs
@@ -1195,10 +1255,111 @@ class AnomalyAgent:
 
         self.run()
 
-if __name__ == "__main__":
-    # model = "openai/gpt-5.5"
-    # model = "openrouter/owl-alpha"
-    model = "poolside/laguna-m.1:free"
-    thread_id = "test_run_5"
-    agent = AnomalyAgent(model, thread_id)
+
+def normalize_optional_config_value(value):
+    if value is None:
+        return None
+
+    value = str(value).strip()
+    if not value or value.lower() in {"none", "null"}:
+        return None
+
+    return value
+
+
+def load_yaml_config(path: str | Path) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Config file must contain a mapping: {path}")
+
+    return data
+
+
+def merge_config(base: dict, override: dict) -> dict:
+    merged = dict(base)
+
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_config(merged[key], value)
+        else:
+            merged[key] = value
+
+    return merged
+
+
+def load_runtime_configs(override_path: str | Path | None = None) -> dict:
+    configs = {
+        "agent": load_yaml_config(file_paths.agent_config_dir),
+        "test": load_yaml_config(file_paths.test_config_dir),
+        "plot": load_yaml_config(file_paths.plot_config_dir),
+    }
+
+    if override_path is None:
+        return configs
+
+    override = load_yaml_config(override_path)
+    sections = {"agent", "test", "plot"}
+    section_keys = sections & set(override)
+
+    if not section_keys:
+        configs["agent"] = merge_config(configs["agent"], override)
+        return configs
+
+    unknown_sections = set(override) - sections
+    if unknown_sections:
+        raise ValueError(f"Unknown config section(s): {', '.join(sorted(unknown_sections))}")
+
+    for section in sections:
+        section_override = override.get(section)
+        if section_override is None:
+            continue
+        if not isinstance(section_override, dict):
+            raise ValueError(f"Config section must contain a mapping: {section}")
+        configs[section] = merge_config(configs[section], section_override)
+
+    return configs
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run the CMB anomaly agent.")
+    parser.add_argument(
+        "--config",
+        help="Optional run config YAML overriding agent, test, and plot defaults.",
+    )
+    parser.add_argument("--model", help="Model name to use for all agent LLM calls.")
+    parser.add_argument("--thread-id", help="Checkpoint/output thread id for this run.")
+    parser.add_argument("--base-url", help="OpenAI-compatible API base URL.")
+    parser.add_argument(
+        "--reasoning-effort",
+        help="Reasoning effort for supported models. Use 'none' to disable.",
+    )
+    args = parser.parse_args()
+
+    runtime_configs = load_runtime_configs(args.config)
+    agent_config = runtime_configs["agent"]
+
+    model = args.model or agent_config.get("model")
+    if not model:
+        parser.error("model must be set in the config file or passed with --model")
+
+    thread_id = args.thread_id or agent_config.get("thread_id", "thread_1")
+    base_url = args.base_url or agent_config.get("base_url", "https://openrouter.ai/api/v1")
+    reasoning_effort = normalize_optional_config_value(
+        args.reasoning_effort if args.reasoning_effort is not None else agent_config.get("reasoning_effort")
+    )
+
+    agent = AnomalyAgent(
+        model=model,
+        thread_id=thread_id,
+        base_url=base_url,
+        reasoning_effort=reasoning_effort,
+        test_config=runtime_configs["test"],
+        plot_config=runtime_configs["plot"],
+    )
     agent()
+
+
+if __name__ == "__main__":
+    main()
