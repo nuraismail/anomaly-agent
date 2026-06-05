@@ -681,11 +681,24 @@ class AnomalyAgent:
             Command: A command to update the agent's state with the search results.
         """
 
-        results = DuckDuckGoSearchResults(num_results=5).run(query)
         id = runtime.state["search_query"][-1].tool_calls[0]['id']
-        search_count = runtime.state["search_count"]
+        search_count = runtime.state.get("search_count", 0)
 
-        return Command(update={"search_results": ['Query: ' + query + '\n\n' + 'Results:\n\n' + results + '\n'], "search_query": [ToolMessage("Success", tool_call_id=id)], "search_count": search_count + 1})
+        try:
+            results = DuckDuckGoSearchResults(num_results=5).run(query)
+            results_text = 'Query: ' + query + '\n\n' + 'Results:\n\n' + results + '\n'
+            tool_message = "Success"
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            results_text = (
+                'Query: ' + query + '\n\n'
+                + 'Search failed:\n\n'
+                + error + '\n\n'
+                + 'The agent should proceed without these web results or try arxiv_search if searches remain.\n'
+            )
+            tool_message = f"Search failed: {error}"
+
+        return Command(update={"search_results": [results_text], "search_query": [ToolMessage(tool_message, tool_call_id=id)], "search_count": search_count + 1})
 
     @tool
     def arxiv_search(query: str, runtime: ToolRuntime) -> Command:
@@ -698,14 +711,29 @@ class AnomalyAgent:
             Command: A command to update the agent's state with the search results.
         """
 
-        client = arxiv.Client()
-        search = arxiv.Search(query=query, max_results=3)
-        results = list(client.results(search))
-        results_str = '\n\n'.join(['\n'.join(['Title: ' + r.title, 'Published: ' + r.published.strftime('%Y/%m/%d'), 'Authors: ' + ', '.join([r.authors[i].name for i in range(len(r.authors) if len(r.authors) <= 5 else 5)]), 'Abstract: ' + r.summary]) for r in results])
         id = runtime.state["search_query"][-1].tool_calls[0]['id']
-        search_count = runtime.state["search_count"]
+        search_count = runtime.state.get("search_count", 0)
 
-        return Command(update={"search_results": ['Query: ' + query + '\n\n' + 'Results:\n\n' + results_str + '\n'], "search_query": [ToolMessage("Success", tool_call_id=id)], "search_count": search_count + 1})
+        try:
+            client = arxiv.Client(page_size=3, delay_seconds=5.0, num_retries=0)
+            search = arxiv.Search(query=query, max_results=3)
+            results = list(client.results(search))
+            results_str = '\n\n'.join(['\n'.join(['Title: ' + r.title, 'Published: ' + r.published.strftime('%Y/%m/%d'), 'Authors: ' + ', '.join([r.authors[i].name for i in range(len(r.authors) if len(r.authors) <= 5 else 5)]), 'Abstract: ' + r.summary]) for r in results])
+            if not results_str:
+                results_str = "No arXiv results returned."
+            results_text = 'Query: ' + query + '\n\n' + 'Results:\n\n' + results_str + '\n'
+            tool_message = "Success"
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            results_text = (
+                'Query: ' + query + '\n\n'
+                + 'Search failed:\n\n'
+                + error + '\n\n'
+                + 'The agent should proceed without these arXiv results or try web_search if searches remain.\n'
+            )
+            tool_message = f"Search failed: {error}"
+
+        return Command(update={"search_results": [results_text], "search_query": [ToolMessage(tool_message, tool_call_id=id)], "search_count": search_count + 1})
 
     # nodes
 
@@ -910,7 +938,7 @@ class AnomalyAgent:
         msg = self.search_llm.invoke(prompt)
 
         if getattr(msg, "tool_calls", None):
-            return {"search_query": [msg], "search_count": state.get("search_count", 0) + 1}
+            return {"search_query": [msg]}
         msg_text = message_content_to_text(msg.content)
         if (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg_text) or msg_text == '')) or getattr(msg, "invalid_tool_calls", None):
             return {"node_retry": True}
