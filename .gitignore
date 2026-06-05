@@ -3,5 +3,6 @@ CMBAnomalyAgent.ipynb
 cmbanomalyagent.py
 .vscode
 *__pycache__
-data/output
+data/input/
+data/output/
 data/anomaly_agent.db*

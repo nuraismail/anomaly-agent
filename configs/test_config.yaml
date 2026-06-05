@@ -1,0 +1,10 @@
+tests_to_run: 5
+max_searches_per_test: 2
+family_soft_cap: 7
+family_hard_cap: 9
+plot_bins: 60
+mask_threshold: 0.9
+max_fix_cycles_per_test: 10
+max_execute_errors_per_test: 5
+max_test_minutes: 30
+max_test_restarts: 2
