@@ -37,7 +37,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain.messages import RemoveMessage
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.prompts import PromptTemplate
 from langchain.tools import tool, ToolRuntime
 from langchain_community.tools import DuckDuckGoSearchResults
@@ -294,8 +294,8 @@ class AnomalyAgent:
         planck_mask_full = hp.read_map(self.planck_map_path, field=3)
 
         planck_map = hp.ud_grade(planck_map_full, target_nside) * 1e6
-        planck_mask = hp.ud_grade(planck_mask_full, target_nside)
-        planck_mask = planck_mask.astype(bool)
+        mask_threshold = self.test_config.get("mask_threshold", 0.9)
+        planck_mask = hp.ud_grade(planck_mask_full, target_nside) >= mask_threshold
 
         planck_map_masked = np.asarray(planck_map, dtype=float).copy()
         planck_map_masked[~planck_mask] = np.nan
@@ -312,25 +312,24 @@ class AnomalyAgent:
             str: A message indicating the outcome/output of the analysis.
         """
 
-        local_env = {}
-        safe_globals = {"np": np, "hp": hp}
+        exec_env = {"np": np, "hp": hp}
 
         try:
             test_codes = state.get("code", [None])
             if not test_codes or test_codes[-1].content is None:
                 self.python_env["last_error"] = "No code found in state to execute."
                 return "ERROR\n\nNo code found in state to execute."
-            exec(test_codes[-1].content, safe_globals, local_env)
+            exec(test_codes[-1].content, exec_env, exec_env)
         except Exception:
             self.python_env["last_error"] = traceback.format_exc()
             return f"ERROR\n\n{self.python_env['last_error']}"
 
-        if "analyze_map" not in local_env:
+        if "analyze_map" not in exec_env:
             self.python_env["last_error"] = "No registered analyze_map(m) function found."
             return "ERROR\n\nNo registered analyze_map(m) function found."
         else:
-            stat_fn = local_env["analyze_map"]
-            summary_fn = local_env.get("summarize_results")
+            stat_fn = exec_env["analyze_map"]
+            summary_fn = exec_env.get("summarize_results")
 
         output_dir = self.current_output_dir(state)
         saved_test_index = self.next_saved_test_index(state)
@@ -420,7 +419,7 @@ class AnomalyAgent:
         
         if "two" in test_type:
             p_value = min(1.0, 2 * min(p_upper, p_lower))
-            sigma = float(norm.isf(p_value / 2.0))
+            sigma = 0.0 if p_value >= 1.0 else float(norm.isf(p_value / 2.0))
         elif "one" in test_type:
             if "upper" in test_type:
                 p_value = p_upper
@@ -428,7 +427,7 @@ class AnomalyAgent:
                 p_value = p_lower
             else:
                 raise ValueError(f"One-tailed test missing upper/lower direction: {test_type}")
-            sigma = float(norm.isf(p_value))
+            sigma = 0.0 if p_value >= 1.0 else float(norm.isf(p_value))
         else:
             raise ValueError(f"Unknown test type: {test_type}")
         
@@ -513,11 +512,10 @@ class AnomalyAgent:
         """
 
         id = runtime.state["messages"][-1].tool_calls[0]['id']
-        local_env = {}
-        safe_globals = {"np": np, "hp": hp}
+        exec_env = {"np": np, "hp": hp}
 
         try:
-            exec(code, safe_globals, local_env)
+            exec(code, exec_env, exec_env)
         except Exception:
             self.python_env["last_error"] = traceback.format_exc()
             self.python_env["analyze_map"] = None
@@ -526,7 +524,7 @@ class AnomalyAgent:
             output_msg = f"ERROR\n\n{self.python_env['last_error']}"
             return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True, "python_env": self.python_env.copy()})
 
-        if "analyze_map" not in local_env:
+        if "analyze_map" not in exec_env:
             self.python_env["last_error"] = "analyze_map(m) was not defined."
             self.python_env["analyze_map"] = None
             self.python_env["summarize_results"] = None
@@ -534,8 +532,8 @@ class AnomalyAgent:
             output_msg = "ERROR\n\nanalyze_map(m) was not defined."
             return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": True, "python_env": self.python_env.copy()})
 
-        analyze_fn = local_env["analyze_map"]
-        summary_fn = local_env.get("summarize_results")
+        analyze_fn = exec_env["analyze_map"]
+        summary_fn = exec_env.get("summarize_results")
 
         # Lightweight guardrails before the expensive full run.
         suspicious_patterns = [
@@ -608,7 +606,7 @@ class AnomalyAgent:
 
         except RuntimeError as e:
             if "Restarting test" in str(e):
-                print(f"ERROR\n\nTime to process Planck map exceeded {probe_max_time * 60} seconds. The time to process the batch of simulated maps may exceed {self.test_config["max_test_minutes"]} minutes as a result.")
+                print(f"ERROR\n\nTime to process Planck map exceeded {probe_max_time * 60} seconds. The time to process the batch of simulated maps may exceed {self.test_config['max_test_minutes']} minutes as a result.")
                 raise
             else:
                 raise
@@ -629,7 +627,7 @@ class AnomalyAgent:
 
         self.python_env["analyze_map"] = analyze_fn
         self.python_env["summarize_results"] = summary_fn
-        self.python_env["test_description"] = local_env.get("test_description", "No description provided.")
+        self.python_env["test_description"] = exec_env.get("test_description", "No description provided.")
         self.python_env["last_error"] = None
         output_msg = "SUCCESS\n\nAnalysis registered."
         return Command(update={"messages": [ToolMessage(output_msg, tool_call_id=id)], "node_retry": False})
@@ -871,7 +869,7 @@ class AnomalyAgent:
         test_hypothesis = state['test_hypothesis'][-1].content
         test_type = state['test_type'][-1].content
         
-        result_payload = state["current_results"]
+        result_payload = dict(state["current_results"])
         entries_to_remove = ('plot_path', 'plot_pdf_path', 'output_dir', 'test_signature')
 
         for k in entries_to_remove:
@@ -1006,10 +1004,13 @@ class AnomalyAgent:
             }
         
         initial_input = {
-            "messages": "",
+            "messages": [
+                RemoveMessage(id=REMOVE_ALL_MESSAGES),
+                HumanMessage(content="Start a new anomaly test."),
+            ],
             "search_count": 0,
             "tested_anomalies": tested_anomalies,
-            "current_results": "",
+            "current_results": {},
             "current_test_name": "",
             "current_test_description": "",
             "node_retry": False,
