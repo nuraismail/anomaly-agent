@@ -46,6 +46,92 @@ After installing the project, this equivalent entry point is also available:
 anomaly-agent
 ```
 
+## Generate simulations
+
+Generate LCDM simulation maps with CAMB and healpy. By default, cosmological
+parameters are sampled from Planck-parameter uncertainties:
+
+```bash
+python scripts/generate_simulations.py \
+  --n-maps 1000 \
+  --output data/input/CMBmapsPlanckLCDM256.npy \
+  --seed 12345
+```
+
+The default output is an agent-ready NumPy stack with shape
+`(n_maps, 12*nside^2)` at `nside=256`. Resolution defaults to `auto`: the
+generation `nside` and `lmax` are derived from the beam FWHM, output nside, a
+beam-sampling target, and a beam-power cutoff. For the default 5 arcmin beam and
+`nside=256` output, this recommends synthesis at `nside=2048` with `lmax=4255`,
+then downgrades to the output resolution. The script also writes a manifest JSON
+next to the map file containing the random seed, cosmological parameters, beam,
+derived resolution settings, and any manual overrides.
+
+To instead use fixed Planck mean parameters while varying only the simulated sky
+realization:
+
+```bash
+python scripts/generate_simulations.py \
+  --cosmology-mode fixed \
+  --n-maps 1000 \
+  --output data/input/CMBmapsPlanckLCDM256_fixed.npy \
+  --seed 12345
+```
+
+For a cheaper notebook-style run using the original `lmax=1000` choice:
+
+```bash
+python scripts/generate_simulations.py \
+  --resolution-mode manual \
+  --n-maps 1000 \
+  --nside-generate 2048 \
+  --nside-out 256 \
+  --lmax 1000
+```
+
+The sampled parameter-uncertainty model follows the original notebook
+convention: Planck parameters are sampled independently from Gaussian
+uncertainties. This does not include the full Planck parameter covariance.
+
+## Validate simulations
+
+After generating maps, compute pseudo-spectra from the saved output-resolution
+simulation maps and compare them with Planck SMICA processed in the same way:
+
+```bash
+python scripts/validate_simulations.py \
+  --sim-maps data/input/CMBmapsPlanckLCDM256.npy \
+  --planck-map data/input/COM_CMB_IQU-smica_2048_R3.00_full.fits \
+  --output-dir data/output/simulation_validation \
+  --overwrite
+```
+
+The validation script downgrades SMICA and the Planck mask to the simulation
+`nside`, applies the same binary mask convention as the agent, computes
+output-map pseudo-`D_l` spectra with `healpy.anafast`, bins the spectra, and
+reports a reduced chi-square plus an empirical upper-tail p-value. It writes the
+Planck and simulation spectra, binned spectra, ell bins, and `summary.json` to
+the output directory.
+
+For a full-sky diagnostic without the Planck mask, use the diagonal per-ell
+chi-square mode:
+
+```bash
+python scripts/validate_simulations.py \
+  --sim-maps data/input/CMBmapsPlanckLCDM256.npy \
+  --planck-map data/input/COM_CMB_IQU-smica_2048_R3.00_full.fits \
+  --mask-mode none \
+  --chi2-mode diagonal \
+  --ell-min 2 \
+  --ell-max 767 \
+  --output-dir data/output/simulation_validation_unmasked \
+  --overwrite
+```
+
+This mode sums `(D_l^SMICA - mean(D_l^sim))^2 / Var(D_l^sim)` over individual
+ell values and writes `planck_chi2_per_ell.npy` for inspecting which multipoles
+contribute most.
+
 ## Run analysis
 
 After a run has produced one folder per successful test, compute the run-level

@@ -15,6 +15,7 @@ authors = [
 ]
 dependencies = [
   "arxiv>=2.1",
+  "camb>=1.5",
   "ddgs>=9.0",
   "duckduckgo-search>=8.0",
   "healpy>=1.18",
