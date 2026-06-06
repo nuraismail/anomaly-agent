@@ -34,6 +34,16 @@ The current code expects to be run from the repository root because config and
 data paths are repository-relative. Place the required CMB inputs under
 `data/input/`.
 
+Download the Planck SMICA map used by the agent and validation scripts with:
+
+```bash
+mkdir -p data/input
+
+curl -L -C - \
+  -o data/input/COM_CMB_IQU-smica_2048_R3.00_full.fits \
+  https://irsa.ipac.caltech.edu/data/Planck/release_3/all-sky-maps/maps/component-maps/cmb/COM_CMB_IQU-smica_2048_R3.00_full.fits
+```
+
 ## Run
 
 ```bash
