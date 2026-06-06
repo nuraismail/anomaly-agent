@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anomaly-agent"
+version = "0.1.0"
+description = "Agentic AI tooling for proposing, executing, and evaluating CMB anomaly tests."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Harry Chambers" },
+  { name = "Nura Ismail" },
+  { name = "Adam Moss" },
+]
+dependencies = [
+  "arxiv>=2.1",
+  "ddgs>=9.0",
+  "duckduckgo-search>=8.0",
+  "healpy>=1.18",
+  "langchain>=1.0",
+  "langchain-community>=0.4",
+  "langchain-core>=1.0",
+  "langchain-openai>=1.0",
+  "langgraph>=1.0",
+  "langgraph-checkpoint-sqlite>=3.0",
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "python-dotenv>=1.0",
+  "PyYAML>=6.0",
+  "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.8",
+]
+
+[project.scripts]
+anomaly-agent = "AnomalyAgent:main"
+
+[tool.setuptools]
+py-modules = ["AnomalyAgent", "file_paths"]
+packages = ["utils"]
