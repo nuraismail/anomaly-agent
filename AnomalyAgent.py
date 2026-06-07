@@ -58,6 +58,7 @@ class AnomalyAgent:
         thread_id (str, optional): Label for conversation thread (used to maintain persistence)
         base_url (str, optional): OpenAI-compatible API base URL
         reasoning_effort (str, optional): Reasoning effort passed to supported models
+        sim_maps_path (str | Path, optional): Simulation map .npy stack or glob
     """
     
     def __init__(
@@ -66,6 +67,7 @@ class AnomalyAgent:
         thread_id: str = "thread_1",
         base_url: str = "https://openrouter.ai/api/v1",
         reasoning_effort: str | None = None,
+        sim_maps_path: str | Path | None = None,
         test_config: dict | None = None,
         plot_config: dict | None = None,
     ):
@@ -86,7 +88,11 @@ class AnomalyAgent:
         self.previous_state = None
         self.state = None
 
-        self.sim_maps_path = file_paths.sim_maps_path
+        self.sim_maps_path = (
+            Path(sim_maps_path).expanduser()
+            if sim_maps_path
+            else file_paths.sim_maps_path
+        )
         self.planck_map_path = file_paths.planck_map_path
         self.output_root = file_paths.output_dir
 
@@ -1294,13 +1300,14 @@ def load_runtime_configs(override_path: str | Path | None = None) -> dict:
         "agent": load_yaml_config(file_paths.agent_config_dir),
         "test": load_yaml_config(file_paths.test_config_dir),
         "plot": load_yaml_config(file_paths.plot_config_dir),
+        "paths": {},
     }
 
     if override_path is None:
         return configs
 
     override = load_yaml_config(override_path)
-    sections = {"agent", "test", "plot"}
+    sections = {"agent", "test", "plot", "paths"}
     section_keys = sections & set(override)
 
     if not section_keys:
@@ -1326,7 +1333,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run the CMB anomaly agent.")
     parser.add_argument(
         "--config",
-        help="Optional run config YAML overriding agent, test, and plot defaults.",
+        help="Optional run config YAML overriding agent, test, plot, and paths defaults.",
     )
     parser.add_argument("--model", help="Model name to use for all agent LLM calls.")
     parser.add_argument("--thread-id", help="Checkpoint/output thread id for this run.")
@@ -1335,10 +1342,18 @@ def main():
         "--reasoning-effort",
         help="Reasoning effort for supported models. Use 'none' to disable.",
     )
+    parser.add_argument(
+        "--sim-maps",
+        help=(
+            "Simulation map .npy stack or glob. Defaults to the repository "
+            "path configured in file_paths.py."
+        ),
+    )
     args = parser.parse_args()
 
     runtime_configs = load_runtime_configs(args.config)
     agent_config = runtime_configs["agent"]
+    paths_config = runtime_configs["paths"]
 
     model = args.model or agent_config.get("model")
     if not model:
@@ -1346,8 +1361,16 @@ def main():
 
     thread_id = args.thread_id or agent_config.get("thread_id", "thread_1")
     base_url = args.base_url or agent_config.get("base_url", "https://openrouter.ai/api/v1")
-    reasoning_effort = normalize_optional_config_value(
-        args.reasoning_effort if args.reasoning_effort is not None else agent_config.get("reasoning_effort")
+    reasoning_effort_value = (
+        args.reasoning_effort
+        if args.reasoning_effort is not None
+        else agent_config.get("reasoning_effort")
+    )
+    reasoning_effort = normalize_optional_config_value(reasoning_effort_value)
+    sim_maps_path = (
+        args.sim_maps
+        or paths_config.get("sim_maps_path")
+        or agent_config.get("sim_maps_path")
     )
 
     agent = AnomalyAgent(
@@ -1355,6 +1378,7 @@ def main():
         thread_id=thread_id,
         base_url=base_url,
         reasoning_effort=reasoning_effort,
+        sim_maps_path=sim_maps_path,
         test_config=runtime_configs["test"],
         plot_config=runtime_configs["plot"],
     )

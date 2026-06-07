@@ -50,6 +50,20 @@ curl -L -C - \
 python AnomalyAgent.py
 ```
 
+To use a specific simulation stack without renaming files, pass `--sim-maps`:
+
+```bash
+python AnomalyAgent.py \
+  --sim-maps data/input/CMBmapsPlanckLCDM256_n10000.npy
+```
+
+The same setting can be placed in a run config YAML:
+
+```yaml
+paths:
+  sim_maps_path: data/input/CMBmapsPlanckLCDM256_n10000.npy
+```
+
 After installing the project, this equivalent entry point is also available:
 
 ```bash
