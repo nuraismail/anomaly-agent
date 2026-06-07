@@ -5,7 +5,14 @@
 from utils.string_utils import cleanup_output_dir, message_content_to_text, parse_test_metadata, text_to_dict
 from utils.summary_utils import build_default_summary, compact_summary
 from utils.TeeIO import tee_stdout
-from utils.family_novelty import extract_test_signature, compact_catalog_text, rotation_guidance_text, novelty_check, family_rotation_check
+from utils.family_novelty import (
+    compact_catalog_text,
+    compact_rejected_proposals_text,
+    extract_test_signature,
+    family_rotation_check,
+    novelty_check,
+    rotation_guidance_text,
+)
 from utils.plot_functions import plot_results
 
 # library
@@ -278,6 +285,32 @@ class AnomalyAgent:
         path.mkdir(parents=True, exist_ok=True)
         
         return path
+
+    def persist_rejected_proposal(
+        self,
+        state: State,
+        test_name: str,
+        test_description: str,
+        rotation_issue: dict | None,
+        novelty_issue: dict | None,
+        planner_feedback: str,
+    ) -> None:
+        """
+        Appends a rejected planner proposal to run-local audit history.
+        """
+        self.test_output_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "attempted_test_index": self.next_saved_test_index(state),
+            "test_name": test_name,
+            "test_description": test_description,
+            "rotation_issue": rotation_issue,
+            "novelty_issue": novelty_issue,
+            "feedback": planner_feedback,
+        }
+        rejected_path = self.test_output_dir / "rejected_proposals.jsonl"
+        with rejected_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(self.to_python_types(record), default=str) + "\n")
 
     # anomaly test code execution functions
 
@@ -750,10 +783,11 @@ class AnomalyAgent:
     # nodes
 
     def planner_node(self, state: State):
-        tested = state.get("tested_anomalies", [])
-        tested = tested if tested else 'None'
+        tested_anomalies = state.get("tested_anomalies", [])
+        tested = tested_anomalies if tested_anomalies else 'None'
         search_count = state.get("search_count", 0)
         prior_catalog_text = compact_catalog_text(self.test_output_dir)
+        rejected_proposals_text = compact_rejected_proposals_text(self.test_output_dir)
         rotation_guidance = rotation_guidance_text(self.test_output_dir, self.test_config)
         last_message_text = message_content_to_text(state["messages"][-1].content) if state.get("messages") else ""
         planner_feedback = last_message_text if "REJECTED" in last_message_text else ""
@@ -770,7 +804,16 @@ class AnomalyAgent:
             template = file["template"]
         
         prompt = PromptTemplate.from_template(template)
-        prompt = prompt.format_prompt(search_instruction=search_instruction, tested=tested, prior_catalog_text=prior_catalog_text, rotation_guidance=rotation_guidance, search_count=search_count, search_results=search_results, planner_feedback=planner_feedback)
+        prompt = prompt.format_prompt(
+            search_instruction=search_instruction,
+            tested=tested,
+            prior_catalog_text=prior_catalog_text,
+            rejected_proposals_text=rejected_proposals_text,
+            rotation_guidance=rotation_guidance,
+            search_count=search_count,
+            search_results=search_results,
+            planner_feedback=planner_feedback,
+        )
 
         print('\n##### PROMPT #####\n')
         print(prompt.to_string())
@@ -796,7 +839,7 @@ class AnomalyAgent:
                 "search_count": 0,
                 "node_retry": False
             }
-        elif rotation_issue is not None:
+        if rotation_issue is not None:
             if rotation_issue["severity"] == "blocked":
                 feedback_parts.append(
                     "REJECTED FOR FAMILY OVERUSE:\n"
@@ -809,21 +852,30 @@ class AnomalyAgent:
                     f"- {rotation_issue['message']}\n"
                     "- Prefer a different family unless you can make the proposal clearly distinct."
                 )
-        else: # novelty_issue is not None
+        if novelty_issue is not None:
             feedback_parts.append(
                 "REJECTED FOR REPETITION:\n"
                 f"- Your last proposal was too similar to prior test '{novelty_issue['prior_name']}'.\n"
-                f"- Prior family: {novelty_issue['family']}. Similarity score: {novelty_issue['score']:.2f}.\n"
+                f"- Prior families: {', '.join(novelty_issue['families'])}. "
+                f"Similarity score: {novelty_issue['score']:.2f}.\n"
                 "- Propose a substantively different test, ideally from a different anomaly family and with a different statistic form.\n"
                 "- Do not make a cosmetic rename of the same dipole/quadrupole/octupole cross-correlation or power-asymmetry template."
             )
 
         planner_feedback = "\n\n".join(feedback_parts)
+        self.persist_rejected_proposal(
+            state,
+            test_name,
+            test_description,
+            rotation_issue,
+            novelty_issue,
+            planner_feedback,
+        )
 
         return {
             "messages": [AIMessage(content=planner_feedback)],
             "node_retry": True,
-    }
+        }
     
     def implement_node(self, state: State):
         test_name = state['current_test_name']

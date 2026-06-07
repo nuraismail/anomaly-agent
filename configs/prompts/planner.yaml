@@ -26,6 +26,10 @@ template: |
 
   {prior_catalog_text}
 
+  RECENT REJECTED PROPOSALS:
+
+  {rejected_proposals_text}
+
   FAMILY ROTATION GUIDANCE:
 
   {rotation_guidance}
