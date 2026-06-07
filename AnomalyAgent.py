@@ -415,7 +415,13 @@ class AnomalyAgent:
                         return "ERROR\n\n" + log.getvalue() + "\n" + self.python_env["last_error"]
                     sim_results.append(sim_stat)
                     processed += 1
-                    if processed <= 10 or (processed <= 100 and processed % 10 == 0) or (processed <= 300 and processed % 50 == 0) or (processed <= 1000 and processed % 100 == 0):
+                    if (
+                        processed <= 10
+                        or (processed <= 100 and processed % 10 == 0)
+                        or (processed <= 300 and processed % 50 == 0)
+                        or (processed <= 1000 and processed % 100 == 0)
+                        or processed % 1000 == 0
+                    ):
                         print(f"Processed {processed} simulations (latest source: {sim_source})")
 
         except Exception:
