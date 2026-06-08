@@ -1,0 +1,18 @@
+# Optional run-specific override for a canonical anomaly implementation.
+# Use with: python canonical_agent.py "cold spot" --config configs/canonical_run_config.example.yaml
+
+agent:
+  model: openai/gpt-5.5
+  thread_id: canonical_cold_spot
+  reasoning_effort: high
+
+test:
+  tests_to_run: 1
+  max_searches_per_test: 4
+
+paths:
+  sim_maps_path: data/input/CMBmapsPlanckLCDM256.npy
+
+plot:
+  figure.dpi: 150
+  savefig.dpi: 300

@@ -156,6 +156,28 @@ After installing the project, this equivalent entry point is also available:
 anomaly-agent
 ```
 
+## Run a canonical anomaly
+
+To implement a specified published anomaly rather than ask the agent to invent a
+new test, use the canonical agent:
+
+```bash
+python canonical_agent.py "cold spot" \
+  --config configs/canonical_run_config.example.yaml
+```
+
+The canonical agent subclasses the main agent. It replaces only the planner: the
+planner researches the named anomaly and writes an implementation-ready
+canonical specification, while the implementation, execution, plotting, and
+summary nodes are shared with the exploratory agent.
+
+After installing the project, this equivalent entry point is also available:
+
+```bash
+canonical-anomaly-agent "cold spot" \
+  --config configs/canonical_run_config.example.yaml
+```
+
 ## Run analysis
 
 After a run has produced one folder per successful test, compute the run-level
