@@ -47,13 +47,13 @@ curl -L -C - \
 ## Run
 
 ```bash
-python AnomalyAgent.py
+python anomaly_agent.py
 ```
 
 To use a specific simulation stack without renaming files, pass `--sim-maps`:
 
 ```bash
-python AnomalyAgent.py \
+python anomaly_agent.py \
   --sim-maps data/input/CMBmapsPlanckLCDM256_n10000.npy
 ```
 

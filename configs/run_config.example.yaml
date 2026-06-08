@@ -1,5 +1,5 @@
 # Optional run-specific override file.
-# Use with: python AnomalyAgent.py --config configs/run_config.example.yaml
+# Use with: python anomaly_agent.py --config configs/run_config.example.yaml
 
 agent:
   model: openai/gpt-5.5

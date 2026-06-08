@@ -1,4 +1,4 @@
-############# AnomalyAgent.py #############
+############# anomaly_agent.py #############
 
 # user-defined modules
 

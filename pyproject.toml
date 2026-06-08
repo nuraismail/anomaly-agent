@@ -39,8 +39,8 @@ dev = [
 ]
 
 [project.scripts]
-anomaly-agent = "AnomalyAgent:main"
+anomaly-agent = "anomaly_agent:main"
 
 [tool.setuptools]
-py-modules = ["AnomalyAgent", "file_paths"]
+py-modules = ["anomaly_agent", "file_paths"]
 packages = ["utils"]
