@@ -44,32 +44,6 @@ curl -L -C - \
   https://irsa.ipac.caltech.edu/data/Planck/release_3/all-sky-maps/maps/component-maps/cmb/COM_CMB_IQU-smica_2048_R3.00_full.fits
 ```
 
-## Run
-
-```bash
-python anomaly_agent.py
-```
-
-To use a specific simulation stack without renaming files, pass `--sim-maps`:
-
-```bash
-python anomaly_agent.py \
-  --sim-maps data/input/CMBmapsPlanckLCDM256_n10000.npy
-```
-
-The same setting can be placed in a run config YAML:
-
-```yaml
-paths:
-  sim_maps_path: data/input/CMBmapsPlanckLCDM256_n10000.npy
-```
-
-After installing the project, this equivalent entry point is also available:
-
-```bash
-anomaly-agent
-```
-
 ## Generate simulations
 
 Generate LCDM simulation maps with CAMB and healpy. By default, cosmological
@@ -155,6 +129,32 @@ python scripts/validate_simulations.py \
 This mode sums `(D_l^SMICA - mean(D_l^sim))^2 / Var(D_l^sim)` over individual
 ell values and writes `planck_chi2_per_ell.npy` for inspecting which multipoles
 contribute most.
+
+## Run
+
+```bash
+python anomaly_agent.py
+```
+
+To use a specific simulation stack without renaming files, pass `--sim-maps`:
+
+```bash
+python anomaly_agent.py \
+  --sim-maps data/input/CMBmapsPlanckLCDM256_n10000.npy
+```
+
+The same setting can be placed in a run config YAML:
+
+```yaml
+paths:
+  sim_maps_path: data/input/CMBmapsPlanckLCDM256_n10000.npy
+```
+
+After installing the project, this equivalent entry point is also available:
+
+```bash
+anomaly-agent
+```
 
 ## Run analysis
 
