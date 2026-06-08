@@ -156,6 +156,9 @@ After installing the project, this equivalent entry point is also available:
 anomaly-agent
 ```
 
+Each run writes the effective merged configuration to
+`<run_output_dir>/run_config.yaml`.
+
 ## Run a canonical anomaly
 
 To implement a specified published anomaly rather than ask the agent to invent a

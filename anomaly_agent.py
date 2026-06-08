@@ -77,6 +77,7 @@ class AnomalyAgent:
         sim_maps_path: str | Path | None = None,
         test_config: dict | None = None,
         plot_config: dict | None = None,
+        run_config: dict | None = None,
     ):
         
         # initialise variables
@@ -111,6 +112,12 @@ class AnomalyAgent:
 
         self.test_config = dict(test_config) if test_config is not None else load_yaml_config(file_paths.test_config_dir)
         self.plot_config = dict(plot_config) if plot_config is not None else load_yaml_config(file_paths.plot_config_dir)
+        self.run_config = (
+            self.to_python_types(run_config)
+            if run_config is not None
+            else self.default_run_config()
+        )
+        self.save_run_config()
 
         # initialise checkpointer
 
@@ -181,6 +188,27 @@ class AnomalyAgent:
             return [self.to_python_types(item) for item in value]
         else:
             return value
+
+    def default_run_config(self) -> dict:
+        return {
+            "agent": {
+                "model": self.model,
+                "thread_id": self.thread_id,
+                "base_url": self.base_url,
+                "reasoning_effort": self.reasoning_effort,
+            },
+            "test": self.to_python_types(self.test_config),
+            "paths": {
+                "sim_maps_path": str(self.sim_maps_path),
+                "planck_map_path": str(self.planck_map_path),
+            },
+            "plot": self.to_python_types(self.plot_config),
+        }
+
+    def save_run_config(self) -> None:
+        run_config_path = self.test_output_dir / "run_config.yaml"
+        with run_config_path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(self.run_config, handle, sort_keys=False)
 
     def check_runtime(self, start_time:int | float, max_time:int | float) -> None:
         """
@@ -1394,6 +1422,43 @@ def load_runtime_configs(override_path: str | Path | None = None) -> dict:
     return configs
 
 
+def effective_run_config(
+    runtime_configs: dict,
+    *,
+    model: str,
+    thread_id: str,
+    base_url: str,
+    reasoning_effort: str | None,
+    sim_maps_path: str | Path | None,
+    canonical_anomaly: str | None = None,
+) -> dict:
+    config = {
+        "agent": merge_config(
+            runtime_configs["agent"],
+            {
+                "model": model,
+                "thread_id": thread_id,
+                "base_url": base_url,
+                "reasoning_effort": reasoning_effort,
+            },
+        ),
+        "test": dict(runtime_configs["test"]),
+        "paths": merge_config(
+            runtime_configs.get("paths", {}),
+            {
+                "sim_maps_path": str(sim_maps_path or file_paths.sim_maps_path),
+                "planck_map_path": str(file_paths.planck_map_path),
+            },
+        ),
+        "plot": dict(runtime_configs["plot"]),
+    }
+
+    if canonical_anomaly is not None:
+        config["canonical"] = {"anomaly": canonical_anomaly}
+
+    return config
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run the CMB anomaly agent.")
     parser.add_argument(
@@ -1446,6 +1511,14 @@ def main():
         sim_maps_path=sim_maps_path,
         test_config=runtime_configs["test"],
         plot_config=runtime_configs["plot"],
+        run_config=effective_run_config(
+            runtime_configs,
+            model=model,
+            thread_id=thread_id,
+            base_url=base_url,
+            reasoning_effort=reasoning_effort,
+            sim_maps_path=sim_maps_path,
+        ),
     )
     agent()
 

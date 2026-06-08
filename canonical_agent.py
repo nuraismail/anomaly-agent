@@ -17,6 +17,7 @@ from langchain_core.prompts import PromptTemplate
 
 from anomaly_agent import (
     AnomalyAgent,
+    effective_run_config,
     load_runtime_configs,
     normalize_optional_config_value,
 )
@@ -374,6 +375,15 @@ def main():
         sim_maps_path=sim_maps_path,
         test_config=runtime_configs["test"],
         plot_config=runtime_configs["plot"],
+        run_config=effective_run_config(
+            runtime_configs,
+            model=model,
+            thread_id=thread_id,
+            base_url=base_url,
+            reasoning_effort=reasoning_effort,
+            sim_maps_path=sim_maps_path,
+            canonical_anomaly=args.anomaly,
+        ),
     )
     agent()
 
