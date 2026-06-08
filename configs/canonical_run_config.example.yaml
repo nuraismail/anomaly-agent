@@ -9,6 +9,7 @@ agent:
 test:
   tests_to_run: 1
   max_searches_per_test: 4
+  max_canonical_review_revisions: 2
 
 paths:
   sim_maps_path: data/input/CMBmapsPlanckLCDM256.npy

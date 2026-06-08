@@ -5,11 +5,13 @@ the planner with one that researches and specifies a named published anomaly.
 """
 
 import argparse
+import json
 import re
 from pathlib import Path
 
 import file_paths
 import yaml
+from langgraph.types import RetryPolicy
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import PromptTemplate
 
@@ -18,7 +20,7 @@ from anomaly_agent import (
     load_runtime_configs,
     normalize_optional_config_value,
 )
-from utils.string_utils import message_content_to_text, parse_test_metadata
+from utils.string_utils import message_content_to_text, parse_test_metadata, text_to_dict
 
 
 class CanonicalAnomalyAgent(AnomalyAgent):
@@ -29,6 +31,7 @@ class CanonicalAnomalyAgent(AnomalyAgent):
         canonical_anomaly: str,
         *args,
         canonical_planner_path: str | Path | None = None,
+        canonical_review_path: str | Path | None = None,
         **kwargs,
     ):
         anomaly = str(canonical_anomaly).strip()
@@ -41,6 +44,11 @@ class CanonicalAnomalyAgent(AnomalyAgent):
             Path(canonical_planner_path)
             if canonical_planner_path
             else file_paths.canonical_planner_dir
+        )
+        self.canonical_review_path = (
+            Path(canonical_review_path)
+            if canonical_review_path
+            else file_paths.canonical_review_dir
         )
 
     def planner_node(self, state: AnomalyAgent.State):
@@ -135,6 +143,163 @@ class CanonicalAnomalyAgent(AnomalyAgent):
             "search_count": 0,
             "node_retry": False,
         }
+
+    def canonical_review_rejection_count(self, state: AnomalyAgent.State) -> int:
+        return len(self.canonical_review_feedbacks(state))
+
+    def canonical_review_feedbacks(self, state: AnomalyAgent.State) -> list[str]:
+        feedback = []
+        for msg in state.get("messages", []):
+            text = message_content_to_text(getattr(msg, "content", msg))
+            if "CANONICAL REVIEW REJECTED" in text:
+                feedback.append(text)
+        return feedback
+
+    def canonical_review_node(self, state: AnomalyAgent.State):
+        test_name = state["current_test_name"]
+        test_description = state["current_test_description"]
+        code = self.retrieve_state(state, "code", max_entries=1)
+        test_hypothesis = self.retrieve_state(state, "test_hypothesis", max_entries=1)
+        test_type = self.retrieve_state(state, "test_type", max_entries=1)
+        justification = self.retrieve_state(state, "justification", max_entries=1)
+
+        result_payload = dict(state.get("current_results", {}) or {})
+        for key in ("analysis_code", "plot_path", "plot_pdf_path", "output_dir"):
+            result_payload.pop(key, None)
+        result_payload_text = json.dumps(
+            self.to_python_types(result_payload),
+            indent=2,
+            default=str,
+        )
+
+        review_feedbacks = self.canonical_review_feedbacks(state)
+        previous_review_feedback = review_feedbacks[-1] if review_feedbacks else ""
+
+        with self.canonical_review_path.open("r", encoding="utf-8") as stream:
+            prompt_config = yaml.safe_load(stream)
+            template = prompt_config["template"]
+
+        prompt = PromptTemplate.from_template(template).format_prompt(
+            canonical_anomaly=self.canonical_anomaly,
+            test_name=test_name,
+            test_description=test_description,
+            test_hypothesis=test_hypothesis,
+            test_type=test_type,
+            justification=justification,
+            analysis_code=code,
+            result_payload=result_payload_text,
+            previous_review_feedback=previous_review_feedback,
+        )
+
+        print("\n##### PROMPT #####\n")
+        print(prompt.to_string())
+
+        msg = self.llm.invoke(prompt)
+        msg_text = message_content_to_text(msg.content)
+        review = text_to_dict(msg_text, ["VERDICT", "REASON", "REVISION_GUIDANCE"])
+        verdict = review["VERDICT"].strip().lower()
+        reason = review["REASON"].strip()
+        guidance = review["REVISION_GUIDANCE"].strip()
+
+        current_results = dict(state.get("current_results", {}) or {})
+        review_record = {
+            "verdict": verdict or "invalid",
+            "reason": reason,
+            "revision_guidance": guidance,
+        }
+
+        if verdict.startswith("accept"):
+            review_record["accepted"] = True
+            current_results["canonical_review"] = review_record
+            self.python_env["last_error"] = None
+            return {
+                "messages": [msg],
+                "current_results": current_results,
+                "node_retry": False,
+            }
+
+        if not verdict.startswith("revise"):
+            review_record["accepted"] = True
+            review_record["warning"] = "Review response did not use ACCEPT or REVISE."
+            current_results["canonical_review"] = review_record
+            self.python_env["last_error"] = None
+            return {
+                "messages": [
+                    AIMessage(
+                        content=(
+                            "CANONICAL REVIEW ACCEPTED WITH WARNING:\n"
+                            "- Review response did not use ACCEPT or REVISE."
+                        )
+                    )
+                ],
+                "current_results": current_results,
+                "node_retry": False,
+            }
+
+        max_revisions = int(self.test_config.get("max_canonical_review_revisions", 2))
+        rejection_count = self.canonical_review_rejection_count(state)
+        if rejection_count >= max_revisions:
+            review_record["accepted"] = True
+            review_record["warning"] = (
+                "Accepted after reaching max_canonical_review_revisions."
+            )
+            current_results["canonical_review"] = review_record
+            self.python_env["last_error"] = None
+            return {
+                "messages": [
+                    AIMessage(
+                        content=(
+                            "CANONICAL REVIEW ACCEPTED WITH WARNING:\n"
+                            f"- Reached max_canonical_review_revisions={max_revisions}.\n"
+                            f"- Last review reason: {reason}"
+                        )
+                    )
+                ],
+                "current_results": current_results,
+                "node_retry": False,
+            }
+
+        feedback = (
+            "CANONICAL REVIEW REJECTED:\n"
+            f"- {reason}\n\n"
+            "REVISION_GUIDANCE:\n"
+            f"{guidance or 'Revise the implementation to better match the canonical specification.'}"
+        )
+        review_record["accepted"] = False
+        current_results["canonical_review"] = review_record
+        self.python_env["last_error"] = feedback
+        return {
+            "messages": [AIMessage(content=feedback)],
+            "current_results": current_results,
+            "python_env": {"last_error": feedback},
+            "node_retry": True,
+        }
+
+    def execute_route(self, state: AnomalyAgent.State):
+        if state.get("node_retry") == True:
+            return "implement"
+        else:
+            return "canonical_review"
+
+    def execute_route_options(self):
+        return {"implement": "implement", "canonical_review": "canonical_review"}
+
+    def canonical_review_route(self, state: AnomalyAgent.State):
+        if state.get("node_retry") == True:
+            return "implement"
+        return "summary"
+
+    def add_extra_workflow_nodes(self, workflow):
+        workflow.add_node(
+            "canonical_review",
+            self.canonical_review_node,
+            retry_policy=RetryPolicy(max_attempts=2, initial_interval=5),
+        )
+        workflow.add_conditional_edges(
+            "canonical_review",
+            self.canonical_review_route,
+            {"implement": "implement", "summary": "summary"},
+        )
 
 
 def slugify(value: str) -> str:

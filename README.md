@@ -166,10 +166,12 @@ python canonical_agent.py "cold spot" \
   --config configs/canonical_run_config.example.yaml
 ```
 
-The canonical agent subclasses the main agent. It replaces only the planner: the
-planner researches the named anomaly and writes an implementation-ready
-canonical specification, while the implementation, execution, plotting, and
-summary nodes are shared with the exploratory agent.
+The canonical agent subclasses the main agent. It replaces the planner with one
+that researches the named anomaly and writes an implementation-ready canonical
+specification. It also adds a canonical review gate after execution, so an
+implementation can be sent back for revision if it materially differs from the
+specified literature test. The implementation, execution, plotting, and summary
+machinery are shared with the exploratory agent.
 
 After installing the project, this equivalent entry point is also available:
 

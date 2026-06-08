@@ -1051,6 +1051,12 @@ class AnomalyAgent:
         else:
             return "summary"
 
+    def execute_route_options(self):
+        return {"implement": "implement", "summary": "summary"}
+
+    def add_extra_workflow_nodes(self, workflow):
+        return None
+
     def summary_route(self, state: State):
         last = state.get("search_query", [])
         if len(last) > 0 and getattr(last[-1], "tool_calls", None):
@@ -1288,6 +1294,7 @@ class AnomalyAgent:
         workflow.add_node("execute", self.execute_node, retry_policy=RetryPolicy(max_attempts=2, initial_interval=3))
         workflow.add_node("summary", self.summary_node, retry_policy=RetryPolicy(max_attempts=3, initial_interval=5, backoff_factor=2))
         workflow.add_node("summary_tools", self.summary_tool_node, retry_policy=RetryPolicy(max_attempts=5, initial_interval=5, backoff_factor=2))
+        self.add_extra_workflow_nodes(workflow)
 
         workflow.add_edge(START, "planner")
         workflow.add_conditional_edges(
@@ -1306,7 +1313,7 @@ class AnomalyAgent:
         workflow.add_conditional_edges(
             "execute",
             self.execute_route,
-            {"implement": "implement", "summary": "summary"},
+            self.execute_route_options(),
         )
         workflow.add_conditional_edges(
             "summary",

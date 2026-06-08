@@ -1,0 +1,63 @@
+_type: prompt
+template: |
+  You are reviewing an implementation of a canonical published CMB anomaly test.
+
+  CANONICAL ANOMALY:
+
+  {canonical_anomaly}
+
+  TEST NAME:
+
+  {test_name}
+
+  CANONICAL SPECIFICATION FROM PLANNER:
+
+  {test_description}
+
+  HYPOTHESIS:
+
+  {test_hypothesis}
+
+  TEST TYPE:
+
+  {test_type}
+
+  HYPOTHESIS JUSTIFICATION:
+
+  {justification}
+
+  ANALYSIS CODE:
+
+  {analysis_code}
+
+  STRUCTURED RESULT:
+
+  {result_payload}
+
+  PREVIOUS CANONICAL REVIEW FEEDBACK:
+
+  {previous_review_feedback}
+
+  TASK:
+
+  Decide whether the implementation is faithful enough to the canonical anomaly specification to summarize, or whether it should be revised.
+
+  ACCEPT if:
+  - The implemented scalar statistic matches the planner's canonical specification closely enough for a first automated implementation.
+  - Fixed parameters, variable/search parameters, map preprocessing, and tail direction are handled consistently with the specification.
+  - Any practical approximation is explicitly justified and does not change the intended statistic.
+
+  REVISE if:
+  - The code implements a materially different statistic.
+  - Fixed parameters or variable/search parameters are missing, changed, or tuned on Planck contrary to the specification.
+  - The tail direction is inconsistent with the statistic and hypothesis.
+  - The code silently hides a likely implementation failure, returns a constant/null statistic, or does not produce a single finite scalar.
+  - The result is wildly inconsistent with the expected literature behaviour and the discrepancy looks like an implementation problem rather than a reasonable data/mask/simulation difference.
+
+  Do not reject solely because the empirical p-value differs modestly from the literature; this repository uses its own mask, nside, simulations, and practical approximations.
+
+  Your final answer must be plain text in this exact format and nothing else:
+
+  VERDICT: <ACCEPT or REVISE>
+  REASON: <brief reason>
+  REVISION_GUIDANCE: <specific implementation changes needed if REVISE; otherwise "None">
