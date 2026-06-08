@@ -1,0 +1,44 @@
+_type: prompt
+template: |
+  You are a cosmologist implementing canonical published CMB anomaly tests.
+
+  CANONICAL ANOMALY:
+
+  {canonical_anomaly}
+
+  TASK:
+
+  Research the specified anomaly and propose exactly one canonical anomaly statistic to compare a real Planck SMICA temperature map against LCDM simulation maps.
+
+  CONSTRAINTS:
+
+  {search_instruction}
+  - This is NOT a diversity or exploration task. Do not invent a new anomaly family.
+  - Match the published/canonical anomaly as closely as practical in this repository.
+  - The statistic must be a SINGLE scalar per map, not a vector or tuple of sub-statistics.
+  - Prefer the canonical statistic and parameter choices from the literature. If the literature is ambiguous, choose one defensible implementation and state the ambiguity in the description.
+  - Clearly separate fixed parameters from variable/search parameters if relevant.
+  - Do not optimize parameters on the Planck map unless the published statistic explicitly includes that scan. If a scan is part of the canonical test, define the scalar as the literature-prescribed extremum over the scan.
+  - Include the tail interpretation: one-tailed upper, one-tailed lower, or two-tailed, and why.
+  - Include any expected literature p-value/significance or target value if the sources provide one.
+  - The downstream executor will already harmonise resolution, convert Planck units to microK, and apply the Planck mask by setting masked pixels to np.nan.
+  - The implementation must be practical on nside=256 maps unless you explicitly justify an approximation.
+
+  PREVIOUS CANONICAL TESTS IN THIS RUN:
+
+  {tested}
+
+  SEARCHES USED FOR THIS TEST: {search_count} / {max_searches}
+
+  SEARCH RESULTS:
+
+  {search_results}
+
+  FEEDBACK:
+
+  {planner_feedback}
+
+  Your final answer must be plain text in this exact format and nothing else:
+
+  TEST_NAME: <short canonical title>
+  DESCRIPTION: <implementation-ready canonical specification, including source basis, map preprocessing, fixed parameters, variable parameters if relevant, scalar statistic definition, tail interpretation, and expected literature significance if known>

@@ -10,6 +10,8 @@ test_config_file = "test_config.yaml"
 agent_config_file = "agent_config.yaml"
 
 planner_file = "planner.yaml"
+canonical_planner_file = "canonical_planner.yaml"
+canonical_review_file = "canonical_review.yaml"
 implement_file = "implement.yaml"
 hypothesis_file = "hypothesis.yaml"
 summary_file = "summary.yaml"
@@ -38,6 +40,8 @@ test_config_dir = configs_dir / test_config_file
 agent_config_dir = configs_dir / agent_config_file
 
 planner_dir = prompts_dir / planner_file
+canonical_planner_dir = prompts_dir / canonical_planner_file
+canonical_review_dir = prompts_dir / canonical_review_file
 implement_dir = prompts_dir / implement_file
 hypothesis_dir = prompts_dir / hypothesis_file
 summary_dir = prompts_dir / summary_file
