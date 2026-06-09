@@ -27,6 +27,8 @@ from utils.string_utils import message_content_to_text, parse_test_metadata, tex
 class CanonicalAnomalyAgent(AnomalyAgent):
     """Agent variant for implementing one specified canonical CMB anomaly."""
 
+    agent_mode = "canonical"
+
     def __init__(
         self,
         canonical_anomaly: str,
@@ -382,6 +384,7 @@ def main():
             base_url=base_url,
             reasoning_effort=reasoning_effort,
             sim_maps_path=sim_maps_path,
+            agent_mode=CanonicalAnomalyAgent.agent_mode,
             canonical_anomaly=args.anomaly,
         ),
     )

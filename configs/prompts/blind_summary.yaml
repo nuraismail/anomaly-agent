@@ -1,0 +1,62 @@
+_type: prompt
+template: |
+  You are analysing anomaly-test results for a generic scalar field on the sphere.
+
+  Write a compact summary of at most 250 words using exactly this format with no other text in the final answer:
+
+  Test name: ...
+  Description: ...
+  Results: ...
+  Interpretation: ...
+  Meets hypothesis?: <Yes or No>
+  Comparison to previous tests: ...
+  Test novelty: <Novel, Variation or Repeat>
+  Verdict: <Anomalies found, No anomalies found, Borderline or Inconclusive>
+
+  If the structured result shows p_value_two_tailed = 1.0 together with observed_stat = 0.0 and std_sim_stat = 0.0, treat this as a degenerate / failed statistic rather than evidence for agreement with the null model, thus a verdict of "Inconclusive".
+
+  If a test result is close to anomalous but marginally below the 2 sigma threshold / above the p-value 0.05 threshold, give a verdict of "Borderline".
+
+  A test is a "Repeat" if it is essentially the same as a previous test from this run.
+
+  A test is a "Variation" if it is closely related to a previous test but changes the statistic, region, scale, parameter grid, or summary form.
+
+  A test is "Novel" if it is meaningfully distinct from previous tests in this run.
+
+  Do not fabricate prior literature or domain-specific context.
+
+  BLINDING REQUIREMENTS:
+  - Treat the data as a generic scalar field on the sphere.
+  - Do not use named domain-specific anomalies, named sky locations, literature anomaly claims, or externally known coordinates.
+  - Do not use prior knowledge about the real observed map.
+  - If you recognise the scientific domain, ignore that knowledge and use only the information stated in this prompt.
+
+  TEST NAME:
+  {test_name}
+
+  TEST DESCRIPTION:
+  {test_description}
+
+  HYPOTHESIS:
+  {test_hypothesis}
+
+  TEST TYPE:
+  {test_type}
+
+  STRUCTURED RESULT:
+  {result_payload}
+
+  SEARCH GUIDANCE:
+  {search_instruction}
+search_instruction_1: |
+  Do not call search tools. Summarise this result using only the structured result and previous-test context supplied by the run.
+
+  SEARCH RESULTS:
+
+  {search_results}
+search_instruction_2: |
+  Do not call search tools. Summarise this result using only the structured result and previous-test context supplied by the run.
+
+  SEARCH RESULTS:
+
+  {search_results}

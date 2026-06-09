@@ -10,11 +10,15 @@ test_config_file = "test_config.yaml"
 agent_config_file = "agent_config.yaml"
 
 planner_file = "planner.yaml"
+blind_planner_file = "blind_planner.yaml"
 canonical_planner_file = "canonical_planner.yaml"
 canonical_review_file = "canonical_review.yaml"
 implement_file = "implement.yaml"
+blind_implement_file = "blind_implement.yaml"
 hypothesis_file = "hypothesis.yaml"
+blind_hypothesis_file = "blind_hypothesis.yaml"
 summary_file = "summary.yaml"
+blind_summary_file = "blind_summary.yaml"
 
 data_dir = "data"
 data_dir = Path(data_dir)
@@ -40,8 +44,12 @@ test_config_dir = configs_dir / test_config_file
 agent_config_dir = configs_dir / agent_config_file
 
 planner_dir = prompts_dir / planner_file
+blind_planner_dir = prompts_dir / blind_planner_file
 canonical_planner_dir = prompts_dir / canonical_planner_file
 canonical_review_dir = prompts_dir / canonical_review_file
 implement_dir = prompts_dir / implement_file
+blind_implement_dir = prompts_dir / blind_implement_file
 hypothesis_dir = prompts_dir / hypothesis_file
+blind_hypothesis_dir = prompts_dir / blind_hypothesis_file
 summary_dir = prompts_dir / summary_file
+blind_summary_dir = prompts_dir / blind_summary_file

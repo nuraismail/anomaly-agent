@@ -157,7 +157,34 @@ anomaly-agent
 ```
 
 Each run writes the effective merged configuration to
-`<run_output_dir>/run_config.yaml`.
+`<run_output_dir>/run_config.yaml`. The saved config includes `agent.mode`,
+which is `exploratory`, `blind`, or `canonical`.
+
+## Run a blinded spherical-field control
+
+To test how much the prompts steer the agent toward known CMB anomaly families,
+use the blinded agent:
+
+```bash
+python blind_agent.py \
+  --config configs/blind_run_config.example.yaml
+```
+
+The blinded agent subclasses the main agent. It describes the inputs to the LLM
+as generic masked scalar HEALPix maps on the sphere, disables web/arXiv search,
+and avoids exposing Planck/CMB labels in the planner, implementation,
+hypothesis, summary, and execution-output prompts. The execution, empirical
+p-value calculation, plotting, novelty checks, and output format are shared with
+the exploratory agent. Use a fresh `thread_id` for blinded runs, since prior
+test names and rejected proposals from a CMB-aware run would leak domain
+context.
+
+After installing the project, this equivalent entry point is also available:
+
+```bash
+blind-anomaly-agent \
+  --config configs/blind_run_config.example.yaml
+```
 
 ## Run a canonical anomaly
 

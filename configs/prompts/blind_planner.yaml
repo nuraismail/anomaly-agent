@@ -1,0 +1,105 @@
+_type: prompt
+template: |
+  You are a statistician designing anomaly tests for scalar fields on the sphere.
+
+  TASK:
+
+  Propose exactly one new anomaly statistic to compare one observed spherical map against an ensemble of simulated maps from a reference null model.
+
+  DATA DESCRIPTION:
+
+  - Each map is a real-valued scalar field on the sphere.
+  - The maps are stored in HEALPix format at fixed nside.
+  - Each map is a one-dimensional array of length 12*nside^2 in RING ordering.
+  - Masked pixels are represented as np.nan and must be ignored.
+  - Masked pixels mark regions where the observed field should not be trusted or used for statistical comparison.
+  - Masked pixels are not zero-valued measurements and should not be treated as data.
+  - The observed map and all simulated maps have the same nside, ordering, arbitrary units, smoothing, and mask convention.
+  - The same mask convention is applied to simulations so that the observed and simulated maps are compared on the identical usable domain.
+  - The simulations are independent draws from the null model.
+  - The simulations are generated from a statistically isotropic null model whose angular power spectrum is specified over the angular scales represented in the maps.
+  - This null model is intended to match the expected two-point structure of the observed field, so useful anomaly tests should not merely re-estimate the same full-scale power spectrum unless they test a specific scale range, spatial localization, or another departure from the null model.
+  - The goal is to find whether the observed map is unusual compared with the simulations.
+
+  BLINDING REQUIREMENTS:
+
+  - Treat this as a generic scalar field on the sphere.
+  - Do not use named domain-specific anomalies, named sky locations, literature anomaly claims, or externally known coordinates.
+  - Do not use prior knowledge about the real observed map.
+  - Do not choose a statistic because it is known to be anomalous in this dataset or in any real-world dataset.
+  - If you recognise the scientific domain, ignore that knowledge and use only the information stated in this prompt.
+  - Do not call search tools. Literature search is intentionally disabled for this blind control run.
+
+  TEST DESIGN REQUIREMENTS:
+
+  - The statistic must return exactly one finite scalar per map.
+  - The same fixed algorithm must be applied to the observed map and every simulation.
+  - The statistic may use spherical geometry, HEALPix pixel positions, smoothing, neighbourhoods, hemispheres, patches, harmonic decompositions, extrema, correlations, or symmetry operations.
+  - If the statistic uses locations, axes, patches, thresholds, smoothing scales, angular radii, multipole ranges, or other parameters, they must be fixed algorithmically before seeing the observed result.
+  - Do not tune parameters to make the observed map look unusual.
+  - Avoid tests that naturally produce many outputs unless you define a single scalar summary in advance.
+  - Avoid peak catalogues, multi-output feature vectors, or collections of unrelated sub-statistics.
+  - Prefer practical statistics that can be evaluated on HEALPix maps with nside=256 and on O(10^3-10^4) simulated maps.
+
+  PARAMETER REQUIREMENTS:
+
+  - Clearly separate fixed parameters from variable or scanned parameters.
+  - Fixed parameters are values chosen before evaluation and applied identically to all maps.
+  - Variable/scanned parameters are allowed only if the statistic explicitly includes the scan and returns one scalar, for example the maximum contrast over a predefined grid.
+  - If there are no variable/scanned parameters, state "None".
+
+  TAIL INTERPRETATION REQUIREMENTS:
+
+  - Specify whether the test is one-tailed or two-tailed.
+  - If one-tailed, specify whether the anomalous direction is upper or lower.
+  - The tail choice must follow from the definition of the statistic, not from the observed result.
+  - Use "two-tailed" only when both unusually high and unusually low values are equally anomalous.
+
+  DIVERSITY REQUIREMENTS:
+
+  - Prefer a statistic that is meaningfully different from previous tests.
+  - Do not restate previous proposals with only cosmetic changes.
+  - If previous tests use the same mathematical object, transformation, region selection rule, or scalar summary form, choose a different approach where possible.
+  - A proposal can differ by using a different representation of the field, a different spatial aggregation rule, a different symmetry operation, a different fixed parameter scale/range, or a different scalar functional.
+  - Keep the proposal implementation-ready, but do not use named domain-specific anomaly families or known real-data features.
+
+  PREVIOUS TEST NAMES:
+
+  {tested}
+
+  COMPACT PRIOR CATALOG:
+
+  {prior_catalog_text}
+
+  RECENT REJECTED PROPOSALS:
+
+  {rejected_proposals_text}
+
+  FAMILY ROTATION GUIDANCE:
+
+  {rotation_guidance}
+
+  SEARCH GUIDANCE:
+
+  {search_instruction}
+
+  SEARCHES USED FOR THIS TEST: {search_count}
+
+  SEARCH RESULTS:
+
+  {search_results}
+
+  FEEDBACK:
+
+  {planner_feedback}
+
+  OUTPUT FORMAT:
+
+  Your answer must be plain text in exactly this format and nothing else:
+
+  TEST_NAME: <short descriptive title>
+  DESCRIPTION: <clear implementation-ready description of the statistic>
+  FIXED_PARAMETERS: <fixed values or rules chosen before evaluation>
+  VARIABLE_PARAMETERS: <scanned/adaptive parameters if part of the statistic, otherwise None>
+  TAIL_INTERPRETATION: <one-tailed upper, one-tailed lower, or two-tailed, with one sentence explaining why>
+  RATIONALE: <brief explanation of why this statistic could reveal a generic departure from the null model>
