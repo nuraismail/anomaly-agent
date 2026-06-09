@@ -207,8 +207,6 @@ Use `--n-bootstrap` for the global p-value bootstrap count and
 
 ## Contributors
 
-Harry Chambers
-Nura Ismail
+Harry Chambers,
+Nura Ismail,
 Adam Moss
-
-[More to be added...]
