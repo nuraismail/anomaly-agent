@@ -279,7 +279,7 @@ class CanonicalAnomalyAgent(AnomalyAgent):
         }
 
     def execute_route(self, state: AnomalyAgent.State):
-        if state.get("node_retry") == True:
+        if state.get("node_retry"):
             return "implement"
         else:
             return "canonical_review"
@@ -288,7 +288,7 @@ class CanonicalAnomalyAgent(AnomalyAgent):
         return {"implement": "implement", "canonical_review": "canonical_review"}
 
     def canonical_review_route(self, state: AnomalyAgent.State):
-        if state.get("node_retry") == True:
+        if state.get("node_retry"):
             return "implement"
         return "summary"
 
