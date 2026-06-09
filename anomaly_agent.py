@@ -67,6 +67,8 @@ class AnomalyAgent:
         reasoning_effort (str, optional): Reasoning effort passed to supported models
         sim_maps_path (str | Path, optional): Simulation map .npy stack or glob
     """
+
+    agent_mode = "exploratory"
     
     def __init__(
         self,
@@ -118,6 +120,25 @@ class AnomalyAgent:
             else self.default_run_config()
         )
         self.save_run_config()
+
+        self.planner_prompt_path = file_paths.planner_dir
+        self.implement_prompt_path = file_paths.implement_dir
+        self.hypothesis_prompt_path = file_paths.hypothesis_dir
+        self.summary_prompt_path = file_paths.summary_dir
+        self.allow_search_tools = True
+        self.observed_map_label = "Planck map"
+        self.observed_statistic_label = "Observed Planck statistic"
+        self.show_simulation_sources = True
+        self.summary_stop_markers = [
+            "Test name",
+            "Description",
+            "Results",
+            "Interpretation",
+            "Meets hypothesis?",
+            "Comparison to literature",
+            "Test novelty",
+            "Verdict",
+        ]
 
         # initialise checkpointer
 
@@ -192,6 +213,7 @@ class AnomalyAgent:
     def default_run_config(self) -> dict:
         return {
             "agent": {
+                "mode": self.agent_mode,
                 "model": self.model,
                 "thread_id": self.thread_id,
                 "base_url": self.base_url,
@@ -234,6 +256,21 @@ class AnomalyAgent:
                 )
         else:
             return None
+
+    def prompt_llm(self, *, with_search_tools: bool = False):
+        if with_search_tools and self.allow_search_tools:
+            return self.search_llm
+        return self.llm
+
+    def format_simulation_source_for_prompt(self, sim_source: str, processed: int | None = None) -> str:
+        if self.show_simulation_sources:
+            return sim_source
+        if processed is None:
+            return "simulation"
+        return f"simulation_{processed:06d}"
+
+    def result_payload_for_prompt(self, result_payload: dict) -> dict:
+        return result_payload
 
     # graph state
 
@@ -353,7 +390,9 @@ class AnomalyAgent:
         """
         paths = sorted(glob(str(self.sim_maps_path)))
         if not paths:
-            raise FileNotFoundError(f"No simulation files matched: {self.sim_maps_path}")
+            if self.show_simulation_sources:
+                raise FileNotFoundError(f"No simulation files matched: {self.sim_maps_path}")
+            raise FileNotFoundError("No simulation files matched the configured simulation path.")
 
         for path in paths:
             arr = np.load(path, allow_pickle=False, mmap_mode="r")
@@ -438,15 +477,15 @@ class AnomalyAgent:
                 print(f"Saved test index: {saved_test_index}")
                 print(f"Output directory: {output_dir}")
                 print(f"Using target nside={target_nside}")
-                print(f"First simulation source: {first_path}")
+                print(f"First simulation source: {self.format_simulation_source_for_prompt(first_path, processed=1)}")
 
                 planck_stat = float(stat_fn(planck_map_masked))
 
-                print(f"Observed Planck statistic: {planck_stat}")
+                print(f"{self.observed_statistic_label}: {planck_stat}")
 
                 if not np.isfinite(planck_stat):
                     self.python_env["last_error"] = (
-                        "Planck statistic is not finite. The registered analyze_map(m) likely "
+                        f"{self.observed_map_label} statistic is not finite. The registered analyze_map(m) likely "
                         "passed np.nan values into a routine that cannot handle masked pixels "
                         "directly. Update analyze_map(m) to ignore masked pixels with np.isfinite "
                         "and, for healpy transforms such as anafast/map2alm, replace masked np.nan "
@@ -466,8 +505,9 @@ class AnomalyAgent:
                     sim_map_masked[~planck_mask] = np.nan
                     sim_stat = float(stat_fn(sim_map_masked))
                     if not np.isfinite(sim_stat):
+                        display_source = self.format_simulation_source_for_prompt(sim_source, processed=processed + 1)
                         self.python_env["last_error"] = (
-                            f"Simulation statistic became non-finite for {sim_source}. "
+                            f"Simulation statistic became non-finite for {display_source}. "
                             "The registered analyze_map(m) is not robust to masked pixels or "
                             "numerical edge cases."
                         )
@@ -483,7 +523,8 @@ class AnomalyAgent:
                         or (processed <= 1000 and processed % 100 == 0)
                         or processed % 1000 == 0
                     ):
-                        print(f"Processed {processed} simulations (latest source: {sim_source})")
+                        display_source = self.format_simulation_source_for_prompt(sim_source, processed=processed)
+                        print(f"Processed {processed} simulations (latest source: {display_source})")
 
         except Exception:
             self.python_env["last_error"] = traceback.format_exc()
@@ -561,6 +602,7 @@ class AnomalyAgent:
 
         result_payload = {
             "saved_test_index": saved_test_index,
+            "agent_mode": self.agent_mode,
             "test_name": state["current_test_name"],
             "test_description": state["current_test_description"],
             "test_hypothesis": state["test_hypothesis"][-1].content,
@@ -666,11 +708,11 @@ class AnomalyAgent:
             planck_probe = float(planck_probe)
 
             if not np.isfinite(planck_probe):
-                raise ValueError("analyze_map(m) returned a non-finite Planck statistic.")
+                raise ValueError(f"analyze_map(m) returned a non-finite {self.observed_map_label} statistic.")
 
             sim_probes = []
 
-            for source, sim_map in sample_items:
+            for sample_index, (source, sim_map) in enumerate(sample_items, start=1):
                 sim_map = np.asarray(sim_map, dtype=float)
                 sim_masked = sim_map.copy()
                 sim_masked[~planck_mask] = np.nan
@@ -682,19 +724,20 @@ class AnomalyAgent:
                 probe = float(probe)
 
                 if not np.isfinite(probe):
-                    raise ValueError(f"Simulation probe became non-finite for {source}.")
+                    display_source = self.format_simulation_source_for_prompt(source, processed=sample_index)
+                    raise ValueError(f"Simulation probe became non-finite for {display_source}.")
                 
                 sim_probes.append(probe)
 
             if planck_probe == 0.0 and all(probe == 0.0 for probe in sim_probes):
                 raise ValueError(
-                    "Degenerate statistic detected: Planck and the first few simulations all produced 0.0. "
+                    f"Degenerate statistic detected: {self.observed_map_label} and the first few simulations all produced 0.0. "
                     "Redesign the analysis so it yields a meaningful non-trivial scalar."
                 )
 
         except RuntimeError as e:
             if "Restarting test" in str(e):
-                print(f"ERROR\n\nTime to process Planck map exceeded {probe_max_time * 60} seconds. The time to process the batch of simulated maps may exceed {self.test_config['max_test_minutes']} minutes as a result.")
+                print(f"ERROR\n\nTime to process {self.observed_map_label} exceeded {probe_max_time * 60} seconds. The time to process the batch of simulated maps may exceed {self.test_config['max_test_minutes']} minutes as a result.")
                 raise
             else:
                 raise
@@ -822,12 +865,12 @@ class AnomalyAgent:
         search_results = self.retrieve_state(state, "search_results", max_entries=3)
         msg = None
 
-        if search_count >= self.test_config["max_searches_per_test"]:
+        if not self.allow_search_tools or search_count >= self.test_config["max_searches_per_test"]:
             search_instruction = "- Do NOT call any search tools."
         else:
             search_instruction = "- You MUST call web_search or arxiv_search. Make only ONE tool call at a time."
 
-        with open(file_paths.planner_dir) as stream:
+        with open(self.planner_prompt_path) as stream:
             file = yaml.safe_load(stream)
             template = file["template"]
         
@@ -846,9 +889,22 @@ class AnomalyAgent:
         print('\n##### PROMPT #####\n')
         print(prompt.to_string())
 
-        msg = self.search_llm.invoke(prompt)
+        msg = self.prompt_llm(with_search_tools=True).invoke(prompt)
 
         if getattr(msg, "tool_calls", None):
+            if not self.allow_search_tools:
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=(
+                                "REJECTED TOOL CALL:\n"
+                                "- Search tools are disabled for this agent. "
+                                "Propose a statistic using only the data description in the prompt."
+                            )
+                        )
+                    ],
+                    "node_retry": True,
+                }
             return {"search_query": [msg]}
         msg_text = message_content_to_text(msg.content)
         if (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg_text or "query:" in msg_text) or msg_text == '')) or getattr(msg, "invalid_tool_calls", None):
@@ -916,7 +972,7 @@ class AnomalyAgent:
         else:
             previous_code = ""
 
-        with open(file_paths.implement_dir) as stream:
+        with open(self.implement_prompt_path) as stream:
             file = yaml.safe_load(stream)
             template = file["template"]
             additional_template = file["additional_template"]
@@ -947,7 +1003,7 @@ class AnomalyAgent:
         test_description = state['current_test_description']
         code = self.retrieve_state(state, "code", max_entries=1)
 
-        with open(file_paths.hypothesis_dir) as stream:
+        with open(self.hypothesis_prompt_path) as stream:
             file = yaml.safe_load(stream)
             template = file["template"]
 
@@ -1004,14 +1060,15 @@ class AnomalyAgent:
         for k in entries_to_remove:
             result_payload.pop(k, None)
 
+        result_payload = self.result_payload_for_prompt(result_payload)
         result_payload = json.dumps(result_payload, indent=2, default=str)
         search_results = self.retrieve_state(state, "search_results", max_entries=1)
 
-        with open(file_paths.summary_dir) as stream:
+        with open(self.summary_prompt_path) as stream:
             file = yaml.safe_load(stream)
             template = file["template"]
 
-            if state.get("search_count", 0) >= self.test_config["max_searches_per_test"]:
+            if not self.allow_search_tools or state.get("search_count", 0) >= self.test_config["max_searches_per_test"]:
                 search_instruction = file["search_instruction_2"]
                 search_instruction = PromptTemplate.from_template(search_instruction)
 
@@ -1027,9 +1084,22 @@ class AnomalyAgent:
         print('\n##### PROMPT #####\n')
         print(prompt.to_string())
 
-        msg = self.search_llm.invoke(prompt)
+        msg = self.prompt_llm(with_search_tools=True).invoke(prompt)
 
         if getattr(msg, "tool_calls", None):
+            if not self.allow_search_tools:
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=(
+                                "REJECTED TOOL CALL:\n"
+                                "- Search tools are disabled for this agent. "
+                                "Write the summary from the structured result only."
+                            )
+                        )
+                    ],
+                    "node_retry": True,
+                }
             return {"search_query": [msg]}
         msg_text = message_content_to_text(msg.content)
         if (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg_text) or msg_text == '')) or getattr(msg, "invalid_tool_calls", None):
@@ -1097,6 +1167,7 @@ class AnomalyAgent:
             out_dir = output_dir / 'result_summary.json'
             data = dict(state.get("current_results", {}) or {})
             data.setdefault("saved_test_index", self.next_saved_test_index(state, test_success=True))
+            data.setdefault("agent_mode", self.agent_mode)
             data.setdefault("test_name", state.get("current_test_name", ""))
             data.setdefault("test_description", state.get("current_test_description", ""))
             data.setdefault("test_hypothesis", self.retrieve_state(state, "test_hypothesis", max_entries=1))
@@ -1116,16 +1187,7 @@ class AnomalyAgent:
             data.setdefault("custom_summary", {})
             data.setdefault("analysis_code", self.retrieve_state(state, "code", max_entries=1) or None)
             data.setdefault("test_signature", extract_test_signature(data["test_name"], data["test_description"]))
-            stop_markers = [
-                    "Test name",
-                    "Description",
-                    "Results",
-                    "Interpretation",
-                    "Meets hypothesis?",
-                    "Comparison to literature",
-                    "Test novelty",
-                    "Verdict",
-                ]
+            stop_markers = self.summary_stop_markers
             summary_text = self.retrieve_state(state, "test_summary", max_entries=1)
             data["test_summary"] = text_to_dict(summary_text, stop_markers)
             with open(out_dir, "w", encoding="utf-8") as f:
@@ -1430,12 +1492,14 @@ def effective_run_config(
     base_url: str,
     reasoning_effort: str | None,
     sim_maps_path: str | Path | None,
+    agent_mode: str = "exploratory",
     canonical_anomaly: str | None = None,
 ) -> dict:
     config = {
         "agent": merge_config(
             runtime_configs["agent"],
             {
+                "mode": agent_mode,
                 "model": model,
                 "thread_id": thread_id,
                 "base_url": base_url,

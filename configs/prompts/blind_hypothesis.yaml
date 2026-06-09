@@ -1,0 +1,36 @@
+_type: prompt
+template: |
+  You are assigning the hypothesis and tail convention for an anomaly statistic on a generic scalar field on the sphere.
+
+  The description of a test and code used for the test results are as follows:
+
+  TEST NAME:
+  {test_name}
+
+  TEST DESCRIPTION:
+  {test_description}
+
+  ANALYSIS CODE:
+  {code}
+
+  TASK:
+  Using only the test description and code above, state the hypothesis for the anomaly test and decide whether the hypothesis is one-tailed or two-tailed.
+
+  BLINDING REQUIREMENTS:
+  - Treat the data as a generic scalar field on the sphere.
+  - Do not use named domain-specific anomalies, named sky locations, literature anomaly claims, or externally known coordinates.
+  - Do not use prior knowledge about the real observed map.
+  - If you recognise the scientific domain, ignore that knowledge and use only the information stated in this prompt.
+
+  TAIL RULES:
+  - A two-tailed test checks whether the value of the test statistic is unusually different in either direction.
+  - A one-tailed test checks whether the value of the test statistic is unusually high or unusually low in a specific direction.
+  - Use a one-tailed test only when the statistic definition gives a clear directional anomaly prediction before seeing the observed result.
+  - If one-tailed, specify upper or lower.
+  - Otherwise use a two-tailed test.
+
+  Your final answer must be in the following format with no other text:
+
+  HYPOTHESIS: <your hypothesis>
+  TEST_TYPE: <one-tailed or two-tailed>, <upper or lower if one-tailed>
+  JUSTIFICATION: <your reasoning>

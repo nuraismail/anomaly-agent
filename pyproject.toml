@@ -41,7 +41,8 @@ dev = [
 [project.scripts]
 anomaly-agent = "anomaly_agent:main"
 canonical-anomaly-agent = "canonical_agent:main"
+blind-anomaly-agent = "blind_agent:main"
 
 [tool.setuptools]
-py-modules = ["anomaly_agent", "canonical_agent", "file_paths"]
+py-modules = ["anomaly_agent", "blind_agent", "canonical_agent", "file_paths"]
 packages = ["utils"]

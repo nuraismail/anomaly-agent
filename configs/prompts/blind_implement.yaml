@@ -1,0 +1,61 @@
+_type: prompt
+template: |
+  You are implementing an anomaly statistic for a generic scalar field on the sphere.
+
+  TEST NAME:
+  {test_name}
+
+  TEST DESCRIPTION:
+  {test_description}
+
+  EXECUTION CONTEXT:
+  - analyze_map(m) will receive a one-dimensional numpy array.
+  - The array is a HEALPix map at fixed nside in RING ordering.
+  - Pixels outside the mask are already set to np.nan.
+  - Masked pixels mark regions where the observed field should not be trusted or used for statistical comparison.
+  - Masked pixels are not zero-valued measurements and should not be treated as data.
+  - The observed map and all simulations have already been harmonised to the same nside, smoothing, arbitrary units, and mask convention.
+  - The same mask convention is applied to simulations so that the observed and simulated maps are compared on the identical usable domain.
+  - The simulations are generated from a statistically isotropic null model whose angular power spectrum is specified over the angular scales represented in the maps.
+  - The statistic should compare the observed map to this null model, not merely re-estimate the same full-scale power spectrum unless the test targets a specific scale range, spatial localization, or another departure from the null model.
+  - Your code must be lightweight enough to run on thousands of simulated maps.
+
+  BLINDING REQUIREMENTS:
+  - Treat the data as a generic scalar field on the sphere.
+  - Do not use named domain-specific anomalies, named sky locations, literature anomaly claims, or externally known coordinates.
+  - Do not use prior knowledge about the real observed map.
+  - If you recognise the scientific domain, ignore that knowledge and use only the information stated in this prompt.
+
+  REQUIREMENTS:
+  - You MUST call register_analysis exactly once.
+  - Pass only Python code to register_analysis.
+  - Do not use markdown fences.
+  - Define:
+      def analyze_map(m): ...
+  - Set:
+      test_description = "..."
+  - You SHOULD define:
+      def summarize_results(observed_stat, sim_results): ...
+  - summarize_results should return a dict with useful derived interpretation fields for this specific test.
+  - summarize_results may include a nested dict plot_spec with keys such as kind, title, xlabel, ylabel, bins, and caption.
+  - Allowed plot_spec kinds are: histogram, ecdf, rank.
+  - If no plot_spec is provided, the runner will auto-select a plot type.
+  - Use np.isfinite to ignore masked pixels represented by np.nan.
+  - If you use healpy transforms such as hp.anafast, hp.map2alm, or spherical-harmonic operations, you MUST first replace masked np.nan pixels with a finite fill value such as 0.0. Never pass arrays containing np.nan directly into healpy.
+  - Return a single finite float from analyze_map. Do not return np.nan or inf.
+  - DO NOT return tuples, lists, dicts, or multiple statistics.
+  - DO NOT use scipy.stats.ks_2samp or similar multi-sample tests inside analyze_map or summarize_results.
+  - DO NOT scan every pixel in Python if there is a cheaper vectorized alternative.
+  - If the statistic collapses to the same constant value on the observed map and a few simulations, redesign it.
+
+  PRIOR CODE, IF ANY:
+  {previous_code}
+
+  {guidance}
+additional_template: |
+  The previous implementation failed during registration or execution.
+
+  ERROR TRACEBACK:
+  {previous_error}
+
+  Fix the code and call register_analysis again.
