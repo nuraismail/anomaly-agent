@@ -54,7 +54,11 @@ def plot_histogram(ax, planck_stat: float, sim_results: np.ndarray, summary: dic
     plot_spec = summary.get("plot_spec", {}) if isinstance(summary, dict) else {}
     default_bins = test_config.get("plot_bins", None) if isinstance(test_config, dict) else 60
     bins = plot_spec.get("bins", default_bins)
-    bins = int(bins) if type(bins) != str else bins if bins in ['auto', 'fd', 'doane', 'scott', 'stone', 'rice', 'sturges', 'sqrt'] else default_bins
+    allowed_string_bins = {"auto", "fd", "doane", "scott", "stone", "rice", "sturges", "sqrt"}
+    if isinstance(bins, str):
+        bins = bins if bins in allowed_string_bins else default_bins
+    else:
+        bins = int(bins)
     ax.hist(
         sim_results,
         bins=bins,
@@ -109,28 +113,28 @@ def plot_rank(ax, planck_stat: float, sim_results: np.ndarray):
     ax.legend(frameon=False, loc="best")
 
 def plot_results(planck_stat: float, sim_results: np.ndarray, output_dir: Path, summary: dict | None = None, plot_config: dict = None, test_config: dict = None):
+    kind = "histogram"
+
     if isinstance(summary, dict):
         plot_spec = summary.get("plot_spec", {})
         requested = plot_spec.get("kind")
 
         if requested in {"histogram", "ecdf", "rank"}:
             kind = requested
-
-        unique_count = len(np.unique(np.round(sim_results, decimals=10)))
-
-        if unique_count <= max(12, len(sim_results) // 20):
-            kind = "rank"
-
-        q25, q75 = np.percentile(sim_results, [25, 75])
-        iqr = q75 - q25
-        spread = np.std(sim_results)
-
-        if spread > 0 and abs(np.mean(sim_results) - np.median(sim_results)) > 0.35 * spread:
-            kind = "ecdf"
-        elif iqr == 0:
-            kind = "rank"
         else:
-            kind = "histogram"
+            unique_count = len(np.unique(np.round(sim_results, decimals=10)))
+
+            if unique_count <= max(12, len(sim_results) // 20):
+                kind = "rank"
+
+            q25, q75 = np.percentile(sim_results, [25, 75])
+            iqr = q75 - q25
+            spread = np.std(sim_results)
+
+            if spread > 0 and abs(np.mean(sim_results) - np.median(sim_results)) > 0.35 * spread:
+                kind = "ecdf"
+            elif iqr == 0:
+                kind = "rank"
 
     plot_spec = summary.get("plot_spec", {}) if isinstance(summary, dict) else {}
     meta = {

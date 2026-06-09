@@ -18,7 +18,6 @@ from utils.plot_functions import plot_results
 # library
 
 import numpy as np
-import matplotlib.pyplot as plt
 import healpy as hp
 import file_paths
 from glob import glob
@@ -597,7 +596,8 @@ class AnomalyAgent:
             sim_results,
             output_dir,
             summary=extra_summary if isinstance(extra_summary, dict) else None,
-            plot_config=self.plot_config
+            plot_config=self.plot_config,
+            test_config=self.test_config,
         )
 
         result_payload = {
@@ -1122,7 +1122,7 @@ class AnomalyAgent:
 
     def planner_route(self, state: State):
         last = state.get("search_query", [])
-        if state.get("node_retry") == True:
+        if state.get("node_retry"):
             print("Did not obtain correct output. Retrying...\n\n")
             return "planner"
         elif len(last) > 0 and getattr(last[-1], "tool_calls", False):
@@ -1144,7 +1144,7 @@ class AnomalyAgent:
             return "hypothesis"
 
     def execute_route(self, state: State):
-        if state.get("node_retry") == True:
+        if state.get("node_retry"):
             return "implement"
         else:
             return "summary"
@@ -1159,7 +1159,7 @@ class AnomalyAgent:
         last = state.get("search_query", [])
         if len(last) > 0 and getattr(last[-1], "tool_calls", None):
             return "summary_tools"
-        elif state.get("node_retry") == True:
+        elif state.get("node_retry"):
             print("Did not obtain correct output. Retrying...\n\n")
             return "summary"
         else:
@@ -1307,7 +1307,7 @@ class AnomalyAgent:
                                 if node == "execute" and isinstance(msg.content, str) and msg.content.startswith("ERROR"):
                                     execute_errors += 1
 
-                            if elapsed_minutes > self.test_config["max_test_minutes"] and ((node != "summary" and node != "summary_tools" and node != "implement" and node != "execute") or (node == "execute" and output["node_retry"] == True)):
+                            if elapsed_minutes > self.test_config["max_test_minutes"] and ((node != "summary" and node != "summary_tools" and node != "implement" and node != "execute") or (node == "execute" and output["node_retry"])):
                                 raise RuntimeError(
                                     f"Restarting test {test_count + 1}: exceeded {self.test_config['max_test_minutes']} minutes."
                                 )
@@ -1357,7 +1357,7 @@ class AnomalyAgent:
                         pending_input = None
                         retry_count -= 1
 
-                if restart_test == True:
+                if restart_test:
                     restart_attempt += 1
                     pending_input = initial_input
                     if restart_attempt <= self.test_config["max_test_restarts"]:
