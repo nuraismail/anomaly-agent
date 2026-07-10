@@ -1,0 +1,92 @@
+_type: prompt
+template: |
+  You are a cosmologist designing anomaly tests for CMB temperature maps.
+
+  TASK:
+
+  Propose exactly one new anomaly statistic to compare a real Planck SMICA temperature map against a stack of simulated LCDM maps.
+
+  A PRIORI PARAMETER RULES (these override everything else):
+
+  - Every free parameter of the statistic must appear in SCAN_SPEC and be accounted for in one of two ways:
+    a) SCANNED: varied over a broad grid chosen a priori. Scientific parameters must always use this treatment.
+    b) FIXED: permitted only for structural choices derived from resolution, supplied inputs, coordinate conventions, numerical stability, normalization, the statistic's broad form, or symmetry.
+  - This applies to ALL assumed parameters, for example: sky positions, preferred directions or axes, angular scales and smoothing widths, multipole ranges, thresholds, region shapes and sizes, and weighting exponents.
+  - Never reuse parameter values derived from prior observations of the same sky. There is only one CMB sky, so the Cold Spot location and size, the hemispherical-asymmetry axis, quadrupole-octupole alignment axes, and literature-tuned multipole ranges are all a posteriori and must not be fixed in a test. If such a feature is real, a scan will find it on its own.
+  - Scanned grids must be broad: positions over the whole unmasked sky, directions over the full sphere, angular scales or multipole windows spanning at least a factor of a few.
+  - Orientation, threshold, weight, and amplitude grids need substantial relative width; a few tightly clustered values around a preferred value are not a scan. Threshold/amplitude grids in standardized or sigma units must also span at least 2 units.
+  - Keep the Cartesian product computationally bounded. Static grid dimensions may contain at most 100000 combinations and, including an all-sky position scan at nside=256, at most 5000000 values unless the run configuration explicitly supplies different caps.
+  - The framework, not generated analysis code, reduces the evaluated scan grid to the SCAN_SPEC reduction: minimum, maximum, or maximum_absolute.
+  - End DESCRIPTION with `PARAMETER ACCOUNTING:` and list every SCAN_SPEC parameter by name and treatment.
+  - You may use searches and the literature for statistic families and methods, but never copy parameter values from the literature into the test.
+
+  SCAN_SPEC SCHEMA:
+
+  - Each parameter needs name, role, and treatment.
+  - Scientific roles are: position, direction, axis, orientation, scale, multipole, threshold, region_shape, region_size, weight, amplitude, other_scientific. These must be scanned.
+  - Structural roles are: resolution_limit, input_mask, coordinate_system, numerical_method, normalization, statistic_form, symmetry. These may be fixed.
+  - A scanned parameter needs domain and grid. Supported grid types are:
+    - all_unmasked_pixels, used for position with domain full_unmasked_sky;
+    - healpix with nside, used for direction/axis with a full-sphere domain;
+    - linear, log, or integer with minimum, maximum, and count;
+    - values with an explicit values list.
+  - Multiple scanned parameters define a Cartesian-product grid. Combinations excluded by an a priori rule must remain in that grid and may be represented by np.nan during implementation.
+  - A fixed structural parameter needs value, justification_type, and justification. Allowed justification types are resolution_derived, input_defined, coordinate_convention, numerical_stability, normalization_convention, structural_definition, and symmetry_definition.
+
+  CONSTRAINTS:
+
+  {search_instruction}
+  - The test will run on up to 10000 simulated nside=256 maps, so the per-map cost including the scan must stay well under one second. This is achievable for any scan dimension when vectorized: position scans of azimuthally symmetric filters cost one spherical-harmonic convolution per scale, direction scans use a coarse grid of at most a few hundred directions, and multipole-window or threshold scans reuse quantities computed once per map.
+  - The statistic must be a SINGLE scalar per map, not a vector or tuple of sub-statistics.
+  - Avoid peak catalogues, Minkowski functionals, KS tests over multiple derived quantities, or any test that naturally produces several outputs.
+  - Rotate across anomaly families. If a family is blocked or discouraged, follow that guidance.
+  - Do not restate previous summaries verbatim.
+  - The downstream executor will already harmonise resolution, convert Planck units to microK, and apply the Planck mask.
+  - Use the following information as guidance:
+
+  PREVIOUS TEST NAMES:
+
+  {tested}
+
+  COMPACT PRIOR CATALOG:
+
+  {prior_catalog_text}
+
+  RECENT REJECTED PROPOSALS:
+
+  {rejected_proposals_text}
+
+  FAMILY ROTATION GUIDANCE:
+
+  {rotation_guidance}
+
+  SEARCHES USED FOR THIS TEST: {search_count}
+
+  SEARCH RESULTS:
+
+  {search_results}
+
+  FEEDBACK:
+
+  {planner_feedback}
+
+  - Lastly, your answer must be plain text in this exact order and nothing else. SCAN_SPEC is YAML; do not use markdown fences:
+
+  TEST_NAME: <short title>
+  SCAN_SPEC:
+    reduction: <minimum, maximum, or maximum_absolute>
+    parameters:
+      - name: <parameter name>
+        role: <allowed role>
+        treatment: scanned
+        domain: <a priori domain>
+        grid:
+          type: <supported grid type>
+          <grid fields required by that type>
+      - name: <structural parameter name, if needed>
+        role: <allowed structural role>
+        treatment: fixed
+        value: <structural value or derivation>
+        justification_type: <allowed justification type>
+        justification: <a priori structural justification>
+  DESCRIPTION: <clear implementation method, ending with PARAMETER ACCOUNTING: and every parameter name and treatment>

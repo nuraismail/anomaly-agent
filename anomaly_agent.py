@@ -256,6 +256,18 @@ class AnomalyAgent:
         else:
             return None
 
+    def preflight_probe_max_minutes(self) -> float:
+        """Return the maximum time allowed for one registration probe."""
+        return self.test_config["max_test_minutes"] / 750
+
+    def code_execution_environment(self) -> dict:
+        """Return globals exposed to generated analysis code."""
+        return {"np": np, "hp": hp}
+
+    def warm_up_registration_probe(self, analyze_fn, sample_map, mask) -> None:
+        """Optionally warm libraries before timing registration; base agents skip it."""
+        return None
+
     def prompt_llm(self, *, with_search_tools: bool = False):
         if with_search_tools and self.allow_search_tools:
             return self.search_llm
@@ -432,7 +444,7 @@ class AnomalyAgent:
             str: A message indicating the outcome/output of the analysis.
         """
 
-        exec_env = {"np": np, "hp": hp}
+        exec_env = self.code_execution_environment()
 
         try:
             test_codes = state.get("code", [None])
@@ -642,7 +654,7 @@ class AnomalyAgent:
         """
 
         id = runtime.state["messages"][-1].tool_calls[0]['id']
-        exec_env = {"np": np, "hp": hp}
+        exec_env = self.code_execution_environment()
 
         try:
             exec(code, exec_env, exec_env)
@@ -697,9 +709,11 @@ class AnomalyAgent:
             target_nside = hp.get_nside(np.asarray(first_map))
             planck_map_masked, planck_mask = self.prepare_planck_data(target_nside)
 
+            self.warm_up_registration_probe(analyze_fn, first_map, planck_mask)
+
+            probe_max_time = self.preflight_probe_max_minutes()
             attempt_start = time.time()
             planck_probe = analyze_fn(planck_map_masked)
-            probe_max_time = self.test_config["max_test_minutes"] / 750
             self.check_runtime(attempt_start, probe_max_time)
 
             if not np.isscalar(planck_probe):

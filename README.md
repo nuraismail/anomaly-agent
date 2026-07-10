@@ -158,7 +158,7 @@ anomaly-agent
 
 Each run writes the effective merged configuration to
 `<run_output_dir>/run_config.yaml`. The saved config includes `agent.mode`,
-which is `exploratory`, `blind`, or `canonical`.
+which is `exploratory`, `blind`, `canonical`, or `scan`.
 
 ## Run a blinded spherical-field control
 
@@ -184,6 +184,66 @@ After installing the project, this equivalent entry point is also available:
 ```bash
 blind-anomaly-agent \
   --config configs/blind_run_config.example.yaml
+```
+
+## Run a scan-enforced agent
+
+To forbid a posteriori parameter choices, use the scan agent. It requires that
+every assumed parameter of a proposed statistic — sky positions, preferred
+directions or axes, angular scales, multipole ranges, thresholds, region
+shapes — is either scanned over a broad a priori grid, with the extremum over
+the grid as the single scalar statistic, or fixed by a broad structural
+choice justified a priori. Parameter values derived from prior observations
+of the sky (for example the known Cold Spot location and size, or the
+hemispherical-asymmetry axis) may not be fixed in a test; if such a feature
+is real, the scan finds it on its own, and the selection cost is paid
+identically on the observed map and on every simulation:
+
+```bash
+python scan_agent.py \
+  --config configs/scan_run_config.example.yaml
+```
+
+The scan agent subclasses the main agent and enforces the policy before map
+evaluation. The planner must emit a machine-readable `SCAN_SPEC` plus a human
+parameter accounting. Deterministic validation rejects missing parameters,
+fixed scientific choices, narrow scale/multipole/size grids, incomplete
+sky/direction coverage, clustered threshold/weight/amplitude/orientation grids,
+oversized Cartesian products, and invalid reductions. The implementer returns
+the full per-grid-point array from `evaluate_scan(m)`; a trusted framework
+wrapper, rather than generated code, applies the declared minimum, maximum, or
+maximum-absolute reduction.
+Imports and external data access are rejected, and a fail-closed semantic
+review checks that the code implements every declared grid without introducing
+hidden scientific constants. This adds one policy-review model call per
+registration attempt.
+
+The AST checks and restricted execution globals are policy enforcement for
+model-generated analysis code, not a security sandbox for adversarial Python.
+Do not run deliberately untrusted hand-written code through `register_analysis`.
+
+The implementation prompt includes vectorized recipes for common scan
+dimensions (multipole windows, direction grids, thresholds, and harmonic-space
+position scans). Harmonic position scans cost one spherical-harmonic
+convolution per scale — about 0.15 s per nside=256 map for a 5-scale scan, or
+roughly 25 minutes for a 10000-map stack. Registration performs an untimed
+simulation warm-up, then times a probe and uses the actual number of configured
+simulations plus a safety factor to reject code whose projected runtime exceeds
+`max_test_minutes`. Successful tests save
+`scan_manifest.yaml` and `scan_policy_review.json` beside the usual result
+artifacts. The empirical p-value calculation, plotting, novelty checks, and
+remaining output format are shared with the exploratory agent.
+
+Because scanned tests tend to re-find the same sky features (for example, any
+cold-feature scan will land on the Cold Spot), per-test p-values are strongly
+correlated across tests; the effective-test estimate in
+`scripts/analyse_run.py` accounts for this at the run level.
+
+After installing the project, this equivalent entry point is also available:
+
+```bash
+scan-anomaly-agent \
+  --config configs/scan_run_config.example.yaml
 ```
 
 ## Run a canonical anomaly

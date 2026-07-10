@@ -1,0 +1,34 @@
+# Optional run-specific override file for the scan-enforced agent.
+# Use with: python scan_agent.py --config configs/scan_run_config.example.yaml
+
+agent:
+  model: openai/gpt-5.5
+  thread_id: scan_example_run
+  reasoning_effort: high
+
+test:
+  tests_to_run: 5
+  # Scan statistics over a 10000-map stack take longer per test than fixed
+  # statistics over 1000 maps (about 25 minutes for a 5-scale position scan),
+  # so raise the per-test budget accordingly.
+  max_test_minutes: 90
+  # Registration projects the measured per-map time over the actual stack and
+  # rejects code that cannot finish within the budget after this safety factor.
+  scan_runtime_safety_factor: 1.25
+  scan_min_points: 3
+  scan_min_span_factor: 3.0
+  scan_min_relative_width: 0.5
+  scan_min_standardized_width: 2.0
+  scan_min_direction_points: 48
+  scan_max_direction_points: 768
+  scan_max_static_grid_points: 100000
+  # 12 * 256^2: conservative upper bound before the actual mask is loaded.
+  scan_position_grid_upper_bound: 786432
+  scan_max_total_grid_values: 5000000
+
+paths:
+  sim_maps_path: data/input/CMBmapsPlanckLCDM256_n10000.npy
+
+plot:
+  figure.dpi: 150
+  savefig.dpi: 300

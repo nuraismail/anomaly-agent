@@ -1,0 +1,68 @@
+_type: prompt
+template: |
+  You are implementing a CMB anomaly statistic in which every assumed parameter is either scanned over an a priori grid or fixed by a broad a priori structural choice, never tuned to known features of the observed sky.
+
+  TEST NAME:
+  {test_name}
+
+  TEST DESCRIPTION:
+  {test_description}
+
+  VALIDATED SCAN SPECIFICATION:
+  {scan_spec}
+
+  EXECUTION CONTEXT:
+  - evaluate_scan(m) will receive a one-dimensional numpy array.
+  - Pixels outside the mask are already set to np.nan.
+  - The Planck map has already been downgraded to the simulation nside and converted to microK.
+  - Your code must be lightweight enough to run on up to 10000 simulated maps: keep the per-map cost well under one second.
+
+  SCAN RULES:
+  - Do NOT hard-code parameter values derived from the observed CMB sky, such as known-anomaly sky coordinates, preferred axes, angular scales, multipole ranges, or thresholds. Implement exactly the validated SCAN SPECIFICATION.
+  - Define evaluate_scan(m), which returns the per-grid-point values as a numpy array. Do not reduce it to a scalar and do not define analyze_map. The trusted framework applies the declared minimum, maximum, or maximum-absolute reduction identically to the observed map and every simulation.
+  - Return at least two finite grid values. np.nan may mark grid points excluded a priori, such as masked positions.
+  - The returned array size must equal the Cartesian product of every declared scanned grid. Keep excluded combinations in the array as np.nan; the framework validates the total size.
+  - Do not enlarge or refine the validated grids in code; registration enforces configured static and total grid-size caps.
+  - evaluate_scan runs identically on the observed map and every simulation; never special-case any map.
+  - The statistic must be deterministic. Do not use random-number generation.
+  - Do not import modules or access files, environment variables, network services, or process state. np and hp are already provided.
+  - Keep scans vectorized. Whatever the scan dimension, compute expensive per-map quantities once and reuse them across the grid. For example:
+    - Multipole-window scans: compute the spectrum once with hp.anafast, then return the per-window statistic over the complete a priori window grid; the framework takes the extremum.
+    - Direction or axis scans: build a coarse a priori direction grid covering the full sphere, such as the 192 pixel centres of an nside=4 grid from hp.pix2vec(4, np.arange(192)), and vectorize the per-direction computation. Never loop over map pixels per direction in Python.
+    - Threshold or amplitude scans: define the grid a priori in units of the map standard deviation and vectorize over it.
+    - Position scans of a localized azimuthally symmetric filter: work in harmonic space so all positions are evaluated at once — compute alm once per map with hp.map2alm(filled, lmax=2*nside, iter=0), then for each scale apply hp.alm2map(hp.almxfl(alm, bl), nside) with bl from hp.gauss_beam or hp.beam2bl. Standardize the filtered field over unmasked pixels at each scale and return the concatenated per-scale fields. Per-position Python loops (for example per-centre disc queries) are far too slow.
+  - Statistics evaluated near the mask boundary can be biased by the masked region (for example a filter whose support overlaps the mask); either exclude such grid points a priori or accept the bias knowingly — it is applied identically to every map, so the empirical p-value remains valid either way.
+
+  REQUIREMENTS:
+  - You MUST call register_analysis exactly once.
+  - Pass only Python code to register_analysis.
+  - Do not use markdown fences.
+  - Define:
+      def evaluate_scan(m): ...
+  - Do NOT define analyze_map; the framework supplies it after policy review.
+  - Set:
+      test_description = "..."
+  - You SHOULD define:
+      def summarize_results(planck_stat, sim_results): ...
+  - summarize_results should return a dict with any useful derived interpretation fields for this specific test.
+  - summarize_results may include a nested dict plot_spec with keys such as kind, title, xlabel, ylabel, bins, and caption.
+  - Allowed plot_spec kinds are: histogram, ecdf, rank.
+  - If no plot_spec is provided, the notebook will auto-select a plot type.
+  - Use np.isfinite to ignore masked pixels represented by np.nan.
+  - If you use healpy transforms such as hp.anafast, hp.map2alm, or spherical-harmonic operations, you MUST first replace masked np.nan pixels with a finite fill value such as 0.0. Never pass arrays containing np.nan directly into healpy.
+  - Return a numpy array from evaluate_scan. Do not return a scalar, tuple, or dict.
+  - DO NOT use scipy.stats.ks_2samp or similar multi-sample tests inside evaluate_scan or summarize_results.
+  - DO NOT scan every pixel in Python if there is a cheaper vectorized alternative.
+  - If the statistic collapses to the same constant value on Planck and a few simulations, redesign it.
+
+  PRIOR CODE, IF ANY:
+  {previous_code}
+
+  {guidance}
+additional_template: |
+  The previous implementation failed policy review, registration, or execution.
+
+  ERROR TRACEBACK:
+  {previous_error}
+
+  Fix the code and call register_analysis again.
