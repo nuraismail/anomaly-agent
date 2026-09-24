@@ -47,7 +47,11 @@ def trajectory(calls: list[dict], proposals: list[dict]) -> list[dict]:
         if call.get("outcome") != "accepted":
             continue
         proposal = next(accepted_iter)
-        signature = extract_test_signature(proposal["test_name"], proposal["test_description"])
+        declared = {
+            "family": proposal.get("declared_family", ""),
+            "statistic_form": proposal.get("declared_stat_form", ""),
+        }
+        signature = extract_test_signature(proposal["test_name"], proposal["test_description"], declared=declared)
         closest = max(((similarity(signature, p), p["name"]) for p in priors), default=(0.0, ""))
         rows.append(
             {
@@ -60,6 +64,8 @@ def trajectory(calls: list[dict], proposals: list[dict]) -> list[dict]:
                 "closest_prior": closest[1],
                 "known_anomaly": "; ".join(proposal.get("known_anomaly_matches") or []),
                 "judge": (proposal.get("judge") or {}).get("label", ""),
+                "duplicate": (proposal.get("dup_judge") or {}).get("verdict", "") == "DUPLICATE",
+                "duplicate_of": (proposal.get("dup_judge") or {}).get("duplicate_of", ""),
                 "output_tokens": call.get("output_tokens"),
             }
         )
@@ -72,7 +78,14 @@ def window_summary(rows: list[dict], proposals: list[dict], width: int) -> list[
     out = []
     for start in range(0, len(rows), width):
         chunk = rows[start : start + width]
-        sigs = [extract_test_signature(p["test_name"], p["test_description"]) for p in proposals[start : start + width]]
+        sigs = [
+            extract_test_signature(
+                p["test_name"],
+                p["test_description"],
+                declared={"family": p.get("declared_family", ""), "statistic_form": p.get("declared_stat_form", "")},
+            )
+            for p in proposals[start : start + width]
+        ]
         pairs = list(itertools.combinations([set(s["tokens"]) for s in sigs], 2))
         families = {f for s in sigs for f in s["families"]}
         out.append(
@@ -84,6 +97,7 @@ def window_summary(rows: list[dict], proposals: list[dict], width: int) -> list[
                 "mean_closest_score": round(sum(r["closest_prior_score"] for r in chunk) / len(chunk), 3),
                 "max_closest_score": round(max(r["closest_prior_score"] for r in chunk), 3),
                 "known_anomaly_frac": round(sum(1 for r in chunk if r["known_anomaly"]) / len(chunk), 2),
+                "duplicate_frac": round(sum(1 for r in chunk if r["duplicate"]) / len(chunk), 2),
                 "pairwise_jaccard": round(sum(len(a & b) / (len(a | b) or 1) for a, b in pairs) / len(pairs), 3) if pairs else None,
                 "judge": ", ".join(f"{k}={v}" for k, v in sorted(
                     {lab: sum(1 for r in chunk if r["judge"] == lab) for lab in {r["judge"] for r in chunk} if lab}.items()
@@ -120,11 +134,11 @@ def main() -> None:
         print(f"\n## {cond_dir.name}: {len(rows)} accepted in {len(calls)} calls ({rejections} rejections)\n")
         print(render(window_summary(rows, proposals, args.window), [
             "tests", "calls_per_accept", "distinct_families", "other_frac", "mean_closest_score",
-            "max_closest_score", "known_anomaly_frac", "pairwise_jaccard", "judge",
+            "max_closest_score", "known_anomaly_frac", "duplicate_frac", "pairwise_jaccard", "judge",
         ]))
         if args.names:
             print()
-            print(render(rows, ["n", "test_name", "families", "stat_form", "closest_prior_score", "known_anomaly", "judge"]))
+            print(render(rows, ["n", "test_name", "families", "stat_form", "closest_prior_score", "known_anomaly", "judge", "duplicate_of"]))
 
 
 if __name__ == "__main__":

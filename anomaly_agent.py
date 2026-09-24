@@ -2,10 +2,11 @@
 
 # user-defined modules
 
-from utils.string_utils import cleanup_output_dir, message_content_to_text, parse_test_metadata, text_to_dict
+from utils.string_utils import cleanup_output_dir, message_content_to_text, parse_declared_fields, parse_test_metadata, text_to_dict
 from utils.summary_utils import build_default_summary, compact_summary
 from utils.TeeIO import tee_stdout
 from utils.family_novelty import (
+    closest_prior_tests,
     compact_catalog_text,
     compact_rejected_proposals_text,
     extract_test_signature,
@@ -288,6 +289,8 @@ class AnomalyAgent:
         current_results: dict
         current_test_name: str
         current_test_description: str
+        current_test_family: str
+        current_stat_form: str
         best_sigma: float
         node_retry: bool
         python_env: dict
@@ -605,6 +608,8 @@ class AnomalyAgent:
             "agent_mode": self.agent_mode,
             "test_name": state["current_test_name"],
             "test_description": state["current_test_description"],
+            "declared_family": state.get("current_test_family", ""),
+            "declared_stat_form": state.get("current_stat_form", ""),
             "test_hypothesis": state["test_hypothesis"][-1].content,
             "justification": state["justification"][-1].content,
             "planck_stat": planck_stat,
@@ -621,7 +626,14 @@ class AnomalyAgent:
             "output_dir": str(output_dir),
             "custom_summary": self.to_python_types(extra_summary),
             "analysis_code": state["code"][-1].content if state.get("code") else None,
-            "test_signature": extract_test_signature(state["current_test_name"], state["current_test_description"]),
+            "test_signature": extract_test_signature(
+                state["current_test_name"],
+                state["current_test_description"],
+                declared={
+                    "family": state.get("current_test_family", ""),
+                    "statistic_form": state.get("current_stat_form", ""),
+                },
+            ),
         }
 
         self.python_env["last_error"] = None
@@ -909,49 +921,65 @@ class AnomalyAgent:
         msg_text = message_content_to_text(msg.content)
         if (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg_text or "query:" in msg_text) or msg_text == '')) or getattr(msg, "invalid_tool_calls", None):
             return {"node_retry": True}
-        else:
-            test_name, test_description = parse_test_metadata(msg_text)
-            rotation_issue = family_rotation_check(self.test_output_dir, self.test_config, test_name, test_description)
-            novelty_issue = novelty_check(self.test_output_dir, test_name, test_description)
-            feedback_parts = []
 
-        if rotation_issue is None and novelty_issue is None:
+        test_name, test_description = parse_test_metadata(msg_text)
+        declared = parse_declared_fields(msg_text)
+        rotation_issue = family_rotation_check(
+            self.test_output_dir, self.test_config, test_name, test_description, declared=declared
+        )
+        novelty_issue = novelty_check(self.test_output_dir, test_name, test_description, declared=declared)
+        if novelty_issue is None and self.test_config.get("novelty_mode", "lexical") == "llm":
+            novelty_issue = self.llm_novelty_check(test_name, test_description, declared)
+
+        # A soft-capped ("discouraged") family is guidance the planner already saw in
+        # the prompt; only a hard-capped ("blocked") family rejects the proposal.
+        blocking_rotation = (
+            rotation_issue if rotation_issue is not None and rotation_issue["severity"] == "blocked" else None
+        )
+
+        if blocking_rotation is None and novelty_issue is None:
             return {
                 "messages": [msg],
                 "current_test_name": test_name,
                 "current_test_description": test_description,
+                "current_test_family": declared.get("family", ""),
+                "current_stat_form": declared.get("statistic_form", ""),
                 "search_count": 0,
-                "node_retry": False
+                "node_retry": False,
             }
-        if rotation_issue is not None:
-            if rotation_issue["severity"] == "blocked":
+
+        feedback_parts = []
+        if blocking_rotation is not None:
+            feedback_parts.append(
+                "REJECTED FOR FAMILY OVERUSE:\n"
+                f"- {blocking_rotation['message']}\n"
+                "- Choose a different anomaly family for the next proposal."
+            )
+        if novelty_issue is not None:
+            if novelty_issue.get("mode") == "llm":
                 feedback_parts.append(
-                    "REJECTED FOR FAMILY OVERUSE:\n"
-                    f"- {rotation_issue['message']}\n"
-                    "- Choose a different anomaly family for the next proposal."
+                    "REJECTED FOR REPETITION:\n"
+                    f"- Your last proposal was judged substantively the same test as prior test '{novelty_issue['prior_name']}'.\n"
+                    f"- Reason: {novelty_issue.get('reason', '')}\n"
+                    "- Propose a test that differs in the mathematical object, the region or scale selection rule, "
+                    "or the scalar summary, not only in wording."
                 )
             else:
                 feedback_parts.append(
-                    "REJECTED FOR FAMILY REPETITION:\n"
-                    f"- {rotation_issue['message']}\n"
-                    "- Prefer a different family unless you can make the proposal clearly distinct."
+                    "REJECTED FOR REPETITION:\n"
+                    f"- Your last proposal was too similar to prior test '{novelty_issue['prior_name']}'.\n"
+                    f"- Prior families: {', '.join(novelty_issue['families'])}. "
+                    f"Similarity score: {novelty_issue['score']:.2f}.\n"
+                    "- Propose a substantively different test, ideally from a different anomaly family and with a different statistic form.\n"
+                    "- Do not make a cosmetic rename of the same dipole/quadrupole/octupole cross-correlation or power-asymmetry template."
                 )
-        if novelty_issue is not None:
-            feedback_parts.append(
-                "REJECTED FOR REPETITION:\n"
-                f"- Your last proposal was too similar to prior test '{novelty_issue['prior_name']}'.\n"
-                f"- Prior families: {', '.join(novelty_issue['families'])}. "
-                f"Similarity score: {novelty_issue['score']:.2f}.\n"
-                "- Propose a substantively different test, ideally from a different anomaly family and with a different statistic form.\n"
-                "- Do not make a cosmetic rename of the same dipole/quadrupole/octupole cross-correlation or power-asymmetry template."
-            )
 
         planner_feedback = "\n\n".join(feedback_parts)
         self.persist_rejected_proposal(
             state,
             test_name,
             test_description,
-            rotation_issue,
+            blocking_rotation,
             novelty_issue,
             planner_feedback,
         )
@@ -960,7 +988,48 @@ class AnomalyAgent:
             "messages": [AIMessage(content=planner_feedback)],
             "node_retry": True,
         }
-    
+
+    def llm_novelty_check(self, test_name: str, test_description: str, declared: dict | None = None):
+        """Ask the model whether a proposal is substantively the same test as a prior one.
+
+        Runs only after the lexical check passes, against the most similar prior
+        tests. Fails open: a failed or unparseable judge call never blocks a proposal.
+        """
+        candidates = closest_prior_tests(self.test_output_dir, test_name, test_description, declared=declared)
+        if not candidates:
+            return None
+
+        with open(file_paths.novelty_judge_dir, "r", encoding="utf-8") as stream:
+            template = yaml.safe_load(stream)["template"]
+
+        prior_text = "\n\n".join(
+            f"[{index}] {entry['name']}\n{entry['description']}" for index, entry in enumerate(candidates, start=1)
+        )
+        prompt = PromptTemplate.from_template(template).format_prompt(
+            candidate_name=test_name,
+            candidate_description=test_description,
+            prior_tests=prior_text,
+        )
+        try:
+            msg = self.llm.invoke(prompt)
+        except Exception as exc:
+            print(f"Novelty judge call failed; accepting proposal: {type(exc).__name__}: {exc}")
+            return None
+
+        review = text_to_dict(message_content_to_text(msg.content), ["VERDICT", "DUPLICATE_OF", "REASON"])
+        if not review["VERDICT"].strip().lower().startswith("duplicate"):
+            return None
+
+        duplicate_of = review["DUPLICATE_OF"].strip().strip("'\"")
+        prior = next((c for c in candidates if c["name"].lower() == duplicate_of.lower()), candidates[0])
+        return {
+            "mode": "llm",
+            "prior_name": prior["name"],
+            "families": prior["families"],
+            "score": float(prior["score"]),
+            "reason": review["REASON"].strip(),
+        }
+
     def implement_node(self, state: State):
         test_name = state['current_test_name']
         test_description = state['current_test_description']
@@ -1170,6 +1239,8 @@ class AnomalyAgent:
             data.setdefault("agent_mode", self.agent_mode)
             data.setdefault("test_name", state.get("current_test_name", ""))
             data.setdefault("test_description", state.get("current_test_description", ""))
+            data.setdefault("declared_family", state.get("current_test_family", ""))
+            data.setdefault("declared_stat_form", state.get("current_stat_form", ""))
             data.setdefault("test_hypothesis", self.retrieve_state(state, "test_hypothesis", max_entries=1))
             data.setdefault("justification", self.retrieve_state(state, "justification", max_entries=1))
             data.setdefault("planck_stat", None)
@@ -1233,6 +1304,8 @@ class AnomalyAgent:
             "current_results": {},
             "current_test_name": "",
             "current_test_description": "",
+            "current_test_family": "",
+            "current_stat_form": "",
             "node_retry": False,
             "search_results": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
         }

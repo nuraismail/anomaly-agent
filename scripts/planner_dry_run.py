@@ -85,6 +85,7 @@ class Condition:
     soft_cap: int = 7
     hard_cap: int = 9
     max_searches: int = 2
+    novelty_mode: str = "lexical"  # or "llm": model-based duplicate check after the lexical one
 
 
 # --- thread-local rotation policy so conditions can run concurrently --------
@@ -93,13 +94,14 @@ _policy = threading.local()
 
 
 def patched_family_rotation_check(*args, **kwargs):
+    """Emulate the pre-fix policy (any rotation issue rejects) when a condition asks for it."""
     issue = real_family_rotation_check(*args, **kwargs)
     if (
         issue is not None
-        and getattr(_policy, "mode", "current") == "fixed"
+        and getattr(_policy, "mode", "fixed") == "current"
         and issue.get("severity") == "discouraged"
     ):
-        return None
+        return {**issue, "severity": "blocked", "emulated_old_policy": True}
     return issue
 
 
@@ -250,7 +252,9 @@ def make_agent(cond: Condition, work_dir: Path, planner, search_planner=None) ->
         "max_searches_per_test": cond.max_searches if cond.search else 0,
         "family_soft_cap": cond.soft_cap,
         "family_hard_cap": cond.hard_cap,
+        "novelty_mode": cond.novelty_mode,
     }
+    agent.llm = getattr(planner, "llm", planner)  # used by the model-based novelty check
     agent.prompt_llm = lambda with_search_tools=False: (
         search_planner if (with_search_tools and cond.search and search_planner is not None) else planner
     )
@@ -271,6 +275,7 @@ def known_anomaly_matches(text: str) -> list[str]:
 
 def run_condition(cond: Condition, out_dir: Path, llm_factory, n_accept: int, max_calls: int) -> dict:
     _policy.mode = cond.policy
+    chain_index = int(cond.name.rsplit("chain", 1)[-1]) if "/chain" in cond.name else 0
     work_dir = out_dir / cond.name / "catalog"
     work_dir.mkdir(parents=True, exist_ok=True)
     tested = seed_catalog(Path(cond.seed_run), work_dir)
@@ -327,19 +332,32 @@ def run_condition(cond: Condition, out_dir: Path, llm_factory, n_accept: int, ma
         else:
             name = result["current_test_name"]
             description = result["current_test_description"]
-            signature = extract_test_signature(name, description)
+            signature = extract_test_signature(
+                name,
+                description,
+                declared={
+                    "family": result.get("current_test_family", ""),
+                    "statistic_form": result.get("current_stat_form", ""),
+                },
+            )
             index = seed_count + len(accepted) + 1
             slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
             test_dir = work_dir / f"Test_{index:02d}_{slug}"
             test_dir.mkdir(parents=True, exist_ok=True)
+            declared = {
+                "declared_family": result.get("current_test_family", ""),
+                "declared_stat_form": result.get("current_stat_form", ""),
+            }
             (test_dir / "result_summary.json").write_text(
-                json.dumps({"saved_test_index": index, "test_name": name, "test_description": description}),
+                json.dumps({"saved_test_index": index, "test_name": name, "test_description": description, **declared}),
                 encoding="utf-8",
             )
             proposal = {
                 "index": index,
+                "chain": chain_index,
                 "test_name": name,
                 "test_description": description,
+                **declared,
                 "families": signature["families"],
                 "stat_form": signature["stat_form"],
                 "components": signature["components"],
@@ -478,6 +496,57 @@ def judge_proposals(out_dir: Path, summaries: list[dict], judge_llm) -> None:
         (cond_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 
+def duplicate_judge(out_dir: Path, summaries: list[dict], judge_llm) -> None:
+    """Post hoc: for each accepted proposal, ask whether it duplicates any earlier one in its chain.
+
+    Uses the same prompt as the in-loop model-based novelty check, so the metric
+    is comparable across conditions whether or not they used that check.
+    """
+    template = yaml.safe_load(Path(file_paths.novelty_judge_dir).read_text(encoding="utf-8"))["template"]
+
+    def judge_one(args):
+        proposal, priors = args
+        if not priors:
+            return {"verdict": "DISTINCT", "duplicate_of": "", "reason": "first test in chain"}
+        prior_text = "\n\n".join(
+            f"[{i}] {p['test_name']}\n{p['test_description'][:500]}" for i, p in enumerate(priors, start=1)
+        )
+        prompt = template.format(
+            candidate_name=proposal["test_name"],
+            candidate_description=proposal["test_description"][:1500],
+            prior_tests=prior_text,
+        )
+        try:
+            msg = judge_llm.invoke(prompt)
+            parsed = text_to_dict(message_content_to_text(msg.content), ["VERDICT", "DUPLICATE_OF", "REASON"])
+            verdict = "DUPLICATE" if parsed["VERDICT"].strip().lower().startswith("dup") else "DISTINCT"
+            return {"verdict": verdict, "duplicate_of": parsed["DUPLICATE_OF"].strip(), "reason": parsed["REASON"].strip()}
+        except Exception as exc:
+            return {"verdict": "ERROR", "duplicate_of": "", "reason": f"{type(exc).__name__}: {exc}"[:300]}
+
+    for summary in summaries:
+        cond_dir = out_dir / summary["condition"]["name"]
+        proposals = json.loads((cond_dir / "proposals.json").read_text(encoding="utf-8"))
+        # chains are concatenated in proposals.json; judge each proposal against earlier ones of the same chain
+        chain_of = {}
+        for p in proposals:
+            chain_of.setdefault(p.get("chain", 0), []).append(p)
+        jobs = []
+        for chain in chain_of.values():
+            for i, p in enumerate(chain):
+                jobs.append((p, chain[:i]))
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            verdicts = list(pool.map(judge_one, jobs))
+        for (p, _), verdict in zip(jobs, verdicts):
+            p["dup_judge"] = verdict
+        judged = [p for p in proposals if p.get("dup_judge")]
+        summary["duplicate_frac"] = (
+            round(sum(1 for p in judged if p["dup_judge"]["verdict"] == "DUPLICATE") / len(judged), 2) if judged else None
+        )
+        (cond_dir / "proposals.json").write_text(json.dumps(proposals, indent=2), encoding="utf-8")
+        (cond_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+
 # --- reporting -------------------------------------------------------------------
 
 
@@ -492,6 +561,7 @@ def render_table(summaries: list[dict]) -> str:
         ("other-family frac", lambda s: s["fraction_other_family"]),
         ("pairwise Jaccard", lambda s: s["mean_pairwise_jaccard"]),
         ("judge", lambda s: ", ".join(f"{k}={v}" for k, v in sorted(s.get("judge_labels", {}).items())) or "-"),
+        ("dup frac", lambda s: s.get("duplicate_frac", "-")),
     ]
     header = "| " + " | ".join(c for c, _ in cols) + " |"
     sep = "|" + "|".join("---" for _ in cols) + "|"
@@ -504,6 +574,8 @@ def default_conditions(out_dir: Path, seed_run: str, blind_seed_run: str) -> lis
     return [
         Condition("baseline", str(file_paths.planner_dir), "current", False, seed_run),
         Condition("softcap_fix", str(file_paths.planner_dir), "fixed", False, seed_run),
+        Condition("structured", str(file_paths.planner_structured_dir), "fixed", False, seed_run),
+        Condition("structured_llm", str(file_paths.planner_structured_dir), "fixed", False, seed_run, novelty_mode="llm"),
         Condition("no_examples", str(no_examples), "fixed", False, seed_run),
         Condition("search_on", str(file_paths.planner_dir), "fixed", True, seed_run),
         Condition("blind_current", str(file_paths.blind_planner_dir), "current", False, blind_seed_run),
@@ -528,6 +600,11 @@ def main() -> None:
     parser.add_argument("--max-calls", type=int, default=32, help="Planner-call budget per condition.")
     parser.add_argument("--conditions", default=None, help="Comma-separated subset of condition names.")
     parser.add_argument("--judge-model", default=None, help="Model for literature novelty labels; 'none' to skip. Defaults to --model.")
+    parser.add_argument(
+        "--duplicate-judge",
+        action="store_true",
+        help="After the run, judge each accepted proposal against earlier ones in its chain with the novelty-judge prompt.",
+    )
     parser.add_argument("--output", default=None, help="Output directory. Defaults to data/output/planner_dry_run/<timestamp>.")
     parser.add_argument("--fake", action="store_true", help="Use a deterministic fake planner to smoke-test the harness.")
     parser.add_argument(
@@ -590,6 +667,11 @@ def main() -> None:
     judge_model = args.judge_model or args.model
     if not args.fake and judge_model.lower() != "none":
         judge_proposals(
+            out_dir, summaries, make_llm(judge_model, args.base_url, args.reasoning_effort, args.reasoning_max_tokens)
+        )
+
+    if not args.fake and args.duplicate_judge:
+        duplicate_judge(
             out_dir, summaries, make_llm(judge_model, args.base_url, args.reasoning_effort, args.reasoning_max_tokens)
         )
 

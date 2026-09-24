@@ -1,0 +1,58 @@
+_type: prompt
+template: |
+  You are a cosmologist designing anomaly tests for CMB temperature maps.
+
+  TASK:
+
+  Propose exactly one new anomaly statistic to compare a real Planck SMICA temperature map against a stack of simulated LCDM maps.
+
+  CONSTRAINTS:
+
+  {search_instruction}
+  - The statistic must be a SINGLE scalar per map, not a vector or tuple of sub-statistics.
+  - The statistic must be computable from one map at a time. It may not use quantities estimated across the simulation ensemble (for example a variance or mean over simulations); the executor evaluates the same function on the observed map and on each simulation independently and compares the resulting scalars.
+  - Prefer a statistic that is informative but still practical on nside=256 maps evaluated over thousands of simulations.
+  - Avoid peak catalogues, Minkowski functionals, KS tests over multiple derived quantities, or any test that naturally produces several outputs.
+  - Rotate across anomaly families. If a family is blocked or discouraged, follow that guidance.
+  - Do not restate previous summaries verbatim.
+  - The downstream executor will already harmonise resolution, convert Planck units to microK, and apply the Planck mask.
+  - Use the following information as guidance:
+
+  PREVIOUS TEST NAMES:
+
+  {tested}
+
+  COMPACT PRIOR CATALOG:
+
+  {prior_catalog_text}
+
+  RECENT REJECTED PROPOSALS:
+
+  {rejected_proposals_text}
+
+  FAMILY ROTATION GUIDANCE:
+
+  {rotation_guidance}
+
+  SEARCHES USED FOR THIS TEST: {search_count}
+
+  SEARCH RESULTS:
+
+  {search_results}
+
+  FEEDBACK:
+
+  {planner_feedback}
+
+  DECLARED LABELS:
+
+  - FAMILY names the anomaly family the statistic belongs to. Use one of: parity, alignment, correlation, hemispherical, direction, power_spectrum, variance, non_gaussianity, morphology, phase, localized_feature. If none fits, give a new short lower-case label of one or two words.
+  - STATISTIC_FORM names the scalar's mathematical form. Use one of: ratio, difference, coefficient, index, angle, amplitude, count, extremum, other.
+  - Choose the labels honestly for the statistic you propose; they are used to track which families have been covered, not to filter wording.
+
+  - Lastly, your answer must be plain text in this exact format and nothing else:
+
+  TEST_NAME: <short title>
+  FAMILY: <one family label>
+  STATISTIC_FORM: <one form label>
+  DESCRIPTION: <clear method description with enough detail for implementation>

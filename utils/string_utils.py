@@ -27,6 +27,29 @@ REASONING_BLOCK_TYPES = {
 }
 
 
+DECLARED_FIELDS = ("FAMILY", "STATISTIC_FORM")
+
+
+def parse_declared_fields(test_text: str) -> dict:
+    """Return planner-declared FAMILY / STATISTIC_FORM labels, normalised, if present.
+
+    Labels are lower-cased with underscores and hyphens turned into spaces so
+    that "power_spectrum", "Power-Spectrum" and "power spectrum" count as one
+    family. Missing or placeholder values are omitted.
+    """
+    declared = {}
+    for field in DECLARED_FIELDS:
+        match = re.search(rf"(?im)^\s*(?:\*\*)?{field}(?:\*\*)?\s*:\s*(.+)$", test_text)
+        if not match:
+            continue
+        value = match.group(1).strip().strip("*`").strip().lower()
+        value = re.sub(r"[_\-]+", " ", value)
+        value = re.sub(r"\s+", " ", value).strip(" .")
+        if value and value not in {"none", "n/a", "null"}:
+            declared[field.lower()] = value
+    return declared
+
+
 def message_content_to_text(content) -> str:
     """Flatten provider content blocks to visible text, dropping reasoning blocks.
 

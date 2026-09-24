@@ -10,6 +10,8 @@ test_config_file = "test_config.yaml"
 agent_config_file = "agent_config.yaml"
 
 planner_file = "planner.yaml"
+planner_structured_file = "planner_structured.yaml"
+novelty_judge_file = "novelty_judge.yaml"
 blind_planner_file = "blind_planner.yaml"
 canonical_planner_file = "canonical_planner.yaml"
 canonical_review_file = "canonical_review.yaml"
@@ -44,6 +46,8 @@ test_config_dir = configs_dir / test_config_file
 agent_config_dir = configs_dir / agent_config_file
 
 planner_dir = prompts_dir / planner_file
+planner_structured_dir = prompts_dir / planner_structured_file
+novelty_judge_dir = prompts_dir / novelty_judge_file
 blind_planner_dir = prompts_dir / blind_planner_file
 canonical_planner_dir = prompts_dir / canonical_planner_file
 canonical_review_dir = prompts_dir / canonical_review_file
