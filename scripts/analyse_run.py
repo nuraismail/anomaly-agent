@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -140,22 +140,24 @@ def empirical_p_value(
     raise ValueError(f"Unsupported tail specification: {tail!r}")
 
 
-def p_value_for_simulation(
-    test: TestResult,
-    simulation_index: int,
-    *,
-    leave_one_out: bool,
-) -> float:
-    value = float(test.simulation_statistics[simulation_index])
+def pooled_p_values(test: TestResult) -> np.ndarray:
+    """Return inclusive tail ranks for Planck first, then each simulated sky.
 
-    if not leave_one_out:
-        reference = test.simulation_statistics
-        return empirical_p_value(value, reference, test.tail, add_one=True)
+    All N+1 skies use the same reference distribution. Counting each sky itself
+    already supplies the add-one correction; another pseudocount would change
+    the ranks. The Planck entry equals its usual empirical add-one p-value.
+    """
+    values = np.concatenate(([test.planck_stat], test.simulation_statistics))
+    if not np.all(np.isfinite(values)):
+        raise ValueError(f"Non-finite statistics found for test {test.name!r}")
 
-    reference = np.delete(test.simulation_statistics, simulation_index)
-    # Leave-one-out avoids counting the target simulation in its own tail count
-    # while still keeping nonzero Monte Carlo p-values.
-    return empirical_p_value(value, reference, test.tail, add_one=True)
+    mode, direction = parse_tail(test.tail)
+    # 'max' assigns every tied value the full inclusive tail count.
+    p_lower = rankdata(values, method="max") / values.size
+    p_upper = rankdata(-values, method="max") / values.size
+    if mode == "two":
+        return np.minimum(1.0, 2.0 * np.minimum(p_upper, p_lower))
+    return p_upper if direction == "upper" else p_lower
 
 
 def load_test_result(test_dir: Path) -> TestResult | None:
@@ -242,24 +244,16 @@ def common_simulation_count(tests: list[TestResult]) -> int:
 
 def compute_simulation_min_p_values(
     tests: list[TestResult],
-    *,
-    leave_one_out: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
     n_sims = common_simulation_count(tests)
-    min_p_values = np.empty(n_sims, dtype=float)
-    min_test_indices = np.empty(n_sims, dtype=int)
+    if any(test.simulation_statistics.size != n_sims for test in tests):
+        raise ValueError("Align simulation counts before computing pooled p-values")
 
-    for simulation_index in range(n_sims):
-        p_values = np.asarray(
-            [
-                p_value_for_simulation(test, simulation_index, leave_one_out=leave_one_out)
-                for test in tests
-            ],
-            dtype=float,
-        )
-        winner = int(np.argmin(p_values))
-        min_p_values[simulation_index] = float(p_values[winner])
-        min_test_indices[simulation_index] = winner
+    # Rank each test once, rather than rebuilding a reference for each sky.
+    # Preserve simulation row alignment to retain correlations between tests.
+    p_values = np.column_stack([pooled_p_values(test)[1:] for test in tests])
+    min_test_indices = np.argmin(p_values, axis=1)
+    min_p_values = p_values[np.arange(n_sims), min_test_indices]
 
     return min_p_values, min_test_indices
 
@@ -705,7 +699,6 @@ def write_summary(
     global_sigma: float,
     bootstrap: dict[str, Any] | None,
     matrix_info: dict[str, Any],
-    leave_one_out: bool,
 ) -> dict[str, Any]:
     test_summaries = []
 
@@ -727,7 +720,7 @@ def write_summary(
         "run_dir": str(run_dir),
         "n_tests": int(len(tests)),
         "n_sims_used": int(min_p_values.size),
-        "simulation_p_values": "leave-one-out" if leave_one_out else "include-own-simulation",
+        "simulation_p_values": "pooled-planck-and-simulations",
         "planck_min_p_value": float(tests[planck_min_index].planck_p_value),
         "planck_min_test_index": int(planck_min_index + 1),
         "planck_min_test_name": tests[planck_min_index].name,
@@ -851,6 +844,7 @@ def write_run_analysis_summary(
         "n_tests": global_summary["n_tests"],
         "n_sims_used": global_summary["n_sims_used"],
         "global_pvalue": {
+            "simulation_p_values": global_summary["simulation_p_values"],
             "planck_min_p_value": global_summary["planck_min_p_value"],
             "planck_min_test_index": global_summary["planck_min_test_index"],
             "planck_min_test_name": global_summary["planck_min_test_name"],
@@ -883,7 +877,6 @@ def analyse_run(
     n_bootstrap: int,
     n_effective_bootstrap: int,
     seed: int,
-    leave_one_out: bool,
 ) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     if output_dir is None:
@@ -898,15 +891,14 @@ def analyse_run(
     if any(test.simulation_statistics.size != n_sims for test in tests):
         print(f"Using first {n_sims} simulations from each test because counts differ.")
         tests = [
-            TestResult(
-                index=test.index,
-                name=test.name,
-                directory=test.directory,
-                planck_stat=test.planck_stat,
+            replace(
+                test,
                 simulation_statistics=test.simulation_statistics[:n_sims],
-                tail=test.tail,
-                planck_p_value=test.planck_p_value,
-                summary=test.summary,
+                planck_p_value=empirical_p_value(
+                    test.planck_stat,
+                    test.simulation_statistics[:n_sims],
+                    test.tail,
+                ),
             )
             for test in tests
         ]
@@ -915,10 +907,7 @@ def analyse_run(
     planck_min_index = int(np.argmin(planck_p_values))
     planck_min_p_value = float(planck_p_values[planck_min_index])
 
-    min_p_values, min_test_indices = compute_simulation_min_p_values(
-        tests,
-        leave_one_out=leave_one_out,
-    )
+    min_p_values, min_test_indices = compute_simulation_min_p_values(tests)
 
     global_below_count = int(np.sum(min_p_values <= planck_min_p_value))
     global_p_value = float((global_below_count + 1.0) / (min_p_values.size + 1.0))
@@ -954,7 +943,6 @@ def analyse_run(
         global_sigma,
         bootstrap,
         matrix_info,
-        leave_one_out,
     )
 
     effective_summary = analyse_effective_tests(
@@ -1010,13 +998,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--include-own-simulation",
         action="store_true",
-        help="For simulated-sky p-values, include that sky in its own reference distribution.",
+        help=(
+            "Deprecated compatibility option; all skies now use inclusive ranks "
+            "in the pooled Planck-plus-simulations distribution."
+        ),
     )
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.include_own_simulation:
+        print("--include-own-simulation is no longer needed; using pooled sky ranks.")
     summary = analyse_run(
         args.run_dir,
         output_dir=args.output_dir,
@@ -1024,7 +1017,6 @@ def main() -> None:
         n_bootstrap=args.n_bootstrap,
         n_effective_bootstrap=args.n_effective_bootstrap,
         seed=args.seed,
-        leave_one_out=not args.include_own_simulation,
     )
 
     print(f"Analysed {summary['n_tests']} tests with {summary['n_sims_used']} simulations.")
