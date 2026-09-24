@@ -228,6 +228,16 @@ correlation matrix. Outputs are written to `<run_dir>/run_analysis/` by default,
 including global p-value and effective-test bootstrap histograms when those
 bootstrap calculations are enabled.
 
+For the global comparison, each test ranks Planck and all simulations together
+in one ensemble of `N+1` skies, counting ties inclusively. The global p-value is
+the fraction of these skies whose minimum per-test p-value is no greater than
+Planck's. This keeps Planck and the simulated skies on the same finite-sample
+scale, including at the most extreme ranks. Saved summaries identify this
+method as `pooled-planck-and-simulations`. The older
+`--include-own-simulation` option is accepted for compatibility and has no
+effect. This calibration assumes the test definitions and tails are fixed;
+it does not account for designing tests around observed features.
+
 Use `--n-bootstrap` for the global p-value bootstrap count and
 `--n-effective-bootstrap` for the effective-test bootstrap count. Set either to
 `0` to disable that uncertainty calculation.
