@@ -38,3 +38,26 @@ def test_text_to_dict_parses_markdown_markers_case_insensitively():
     assert parsed["HYPOTHESIS"] == "unusually high value\nwith continuation"
     assert parsed["TEST_TYPE"] == "one-tailed upper"
     assert parsed["JUSTIFICATION"] == "empirical tail test"
+
+
+def test_message_content_to_text_drops_responses_api_reasoning_blocks():
+    content = [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [],
+            "content": [{"type": "reasoning_text", "text": "TEST_NAME: draft thought\nDESCRIPTION: not the answer"}],
+        },
+        {"type": "text", "text": "TEST_NAME: Final\nDESCRIPTION: the answer", "annotations": []},
+    ]
+
+    text = message_content_to_text(content)
+
+    assert text == "TEST_NAME: Final\nDESCRIPTION: the answer"
+    assert "draft thought" not in text
+
+
+def test_message_content_to_text_recurses_into_nested_content_lists():
+    content = [{"type": "message", "content": [{"type": "output_text", "text": "nested"}]}]
+
+    assert message_content_to_text(content) == "nested"

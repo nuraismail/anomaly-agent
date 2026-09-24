@@ -17,7 +17,23 @@ def parse_test_metadata(test_text: str) -> tuple[str, str]:
     description = re.sub(r"\n{3,}", "\n\n", raw_description)
     return name, description
 
+REASONING_BLOCK_TYPES = {
+    "reasoning",
+    "reasoning_text",
+    "reasoning_content",
+    "reasoning_summary",
+    "thinking",
+    "redacted_thinking",
+}
+
+
 def message_content_to_text(content) -> str:
+    """Flatten provider content blocks to visible text, dropping reasoning blocks.
+
+    Responses-API style reasoning blocks carry the chain of thought under
+    ``content`` (for example MiMo) or ``summary`` (OpenAI); neither is part of
+    the model's answer and must not reach downstream parsers.
+    """
     if content is None:
         return ""
     if isinstance(content, str):
@@ -26,12 +42,13 @@ def message_content_to_text(content) -> str:
         parts = []
         for item in content:
             if isinstance(item, dict):
-                if item.get("type") == "text":
-                    parts.append(str(item.get("text", "")))
-                elif "text" in item:
+                item_type = str(item.get("type") or "")
+                if item_type in REASONING_BLOCK_TYPES:
+                    continue
+                if "text" in item:
                     parts.append(str(item.get("text", "")))
                 elif "content" in item:
-                    parts.append(str(item.get("content", "")))
+                    parts.append(message_content_to_text(item.get("content")))
             else:
                 parts.append(str(item))
         return "\n".join(part for part in parts if part)
