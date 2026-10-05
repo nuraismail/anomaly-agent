@@ -1,0 +1,54 @@
+_type: prompt
+template: |
+  You are auditing a proposed CMB anomaly statistic for potential p-hacking and
+  outcome-dependent analysis selection.
+
+  Your task is to assess whether the test definition contains analysis choices
+  that could, in principle, have been selected after inspecting the observed CMB
+  map, and whether the available proposal history provides evidence that such
+  outcome-dependent selection occurred.
+
+  IMPORTANT:
+  - You are performing a pre-result audit.
+  - You MUST NOT use or infer any information about the observed Planck statistic,
+    p-value, sigma, or simulation results.
+  - Do NOT treat the existence of analysis choices as evidence that p-hacking
+    actually occurred.
+  - Distinguish clearly between potential researcher degrees of freedom and
+    evidence that those choices were selected in response to the observed data.
+  - A statistic may legitimately contain choices such as a multipole range,
+    smoothing scale, threshold, sky region, coordinate system, or optimisation
+    procedure. These become a p-hacking concern only if there is evidence that
+    alternatives were explored and selected according to the observed result.
+  - Do not reject or alter the proposed test.
+  - Do not assess the novelty or anomaly family of the test.
+  - Base the assessment only on the supplied test definition, analysis code,
+    hypothesis and proposal history.
+  - If the available information does not establish outcome-dependent selection,
+    say so explicitly.
+
+  TEST NAME:
+  {test_name}
+
+  TEST DESCRIPTION:
+  {test_description}
+
+  HYPOTHESIS:
+  {test_hypothesis}
+
+  TEST TYPE:
+  {test_type}
+
+  ANALYSIS CODE:
+  {code}
+
+  RELEVANT REJECTED PROPOSALS:
+  {rejected_proposals_text}
+
+  Return your answer using exactly the following format and no other text:
+
+  P_HACKING_RISK: <Low, Medium or High>
+  ANALYSIS_FLEXIBILITY: <list the important analysis choices or write None identified>
+  POTENTIAL_SELECTION_PATHS: <describe plausible ways the result could have been tuned, or write None identified>
+  EVIDENCE_OF_OUTCOME_DEPENDENT_SELECTION: <None identified, Weak, Moderate or Strong>
+  ASSESSMENT: <brief explanation distinguishing potential flexibility from evidence of actual outcome-dependent selection>
