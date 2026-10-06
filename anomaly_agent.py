@@ -123,6 +123,7 @@ class AnomalyAgent:
         self.planner_prompt_path = file_paths.planner_dir
         self.implement_prompt_path = file_paths.implement_dir
         self.hypothesis_prompt_path = file_paths.hypothesis_dir
+        self.audit_prompt_path = file_paths.audit_dir
         self.summary_prompt_path = file_paths.summary_dir
         self.allow_search_tools = True
         self.observed_map_label = "Planck map"
@@ -278,6 +279,7 @@ class AnomalyAgent:
         test_hypothesis: Annotated[list[AnyMessage], add_messages]
         test_type: Annotated[list[AnyMessage], add_messages]
         justification: Annotated[list[AnyMessage], add_messages]
+        audit: dict
         execution_output: Annotated[list[AnyMessage], add_messages]
         test_summary: Annotated[list[AnyMessage], add_messages]
         search_query: Annotated[list[AnyMessage], add_messages]
@@ -1028,6 +1030,67 @@ class AnomalyAgent:
                 "test_hypothesis": [test_dict["HYPOTHESIS"]],
                 "test_type": [test_dict["TEST_TYPE"]],
                 "justification": [test_dict["JUSTIFICATION"]]}
+
+    def audit_node(self, state: State):
+        test_name = state["current_test_name"]
+        test_description = state["current_test_description"]
+
+        test_hypothesis = state["test_hypothesis"][-1].content
+        test_type = state["test_type"][-1].content
+        code = self.retrieve_state(state, "code", max_entries=1)
+
+        # rejected proposals contain proposal/rejection information only, they do not contain the statistical results of executed tests
+        rejected_proposals_text = compact_rejected_proposals_text(
+            self.test_output_dir
+        )
+
+        with open(self.audit_prompt_path) as stream:
+            file = yaml.safe_load(stream)
+            template = file["template"]
+
+        prompt = PromptTemplate.from_template(template)
+        prompt = prompt.format_prompt(
+            test_name=test_name,
+            test_description=test_description,
+            test_hypothesis=test_hypothesis,
+            test_type=test_type,
+            code=code,
+            rejected_proposals_text=rejected_proposals_text,
+        )
+
+        print("\n##### AUDIT PROMPT #####\n")
+        print(prompt.to_string())
+
+        msg = self.llm.invoke(prompt)
+
+        message = message_content_to_text(msg.content)
+
+        stop_markers = [
+            "P_HACKING_RISK",
+            "ANALYSIS_FLEXIBILITY",
+            "POTENTIAL_SELECTION_PATHS",
+            "EVIDENCE_OF_OUTCOME_DEPENDENT_SELECTION",
+            "ASSESSMENT",
+        ]
+
+        audit_dict = text_to_dict(message, stop_markers)
+
+        audit = {
+            "p_hacking_risk": audit_dict.get("P_HACKING_RISK", ""),
+            "analysis_flexibility": audit_dict.get("ANALYSIS_FLEXIBILITY", ""),
+            "potential_selection_paths": audit_dict.get(
+                "POTENTIAL_SELECTION_PATHS", ""
+            ),
+            "evidence_of_outcome_dependent_selection": audit_dict.get(
+                "EVIDENCE_OF_OUTCOME_DEPENDENT_SELECTION", ""
+            ),
+            "assessment": audit_dict.get("ASSESSMENT", ""),
+        }
+
+        return {
+            "messages": [msg],
+            "audit": audit,
+        }
     
     def execute_node(self, state: State):
         output = self.run_registered_analysis(state)
@@ -1233,6 +1296,7 @@ class AnomalyAgent:
             "current_results": {},
             "current_test_name": "",
             "current_test_description": "",
+            "audit": {},
             "node_retry": False,
             "search_results": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
         }
@@ -1381,6 +1445,7 @@ class AnomalyAgent:
         workflow.add_node("implement", self.implement_node, retry_policy=RetryPolicy(max_attempts=3, initial_interval=3))
         workflow.add_node("implement_tools", self.implement_tool_node)
         workflow.add_node("hypothesis", self.hypothesis_node)
+        workflow.add_node("audit", self.audit_node)
         workflow.add_node("execute", self.execute_node, retry_policy=RetryPolicy(max_attempts=2, initial_interval=3))
         workflow.add_node("summary", self.summary_node, retry_policy=RetryPolicy(max_attempts=3, initial_interval=5, backoff_factor=2))
         workflow.add_node("summary_tools", self.summary_tool_node, retry_policy=RetryPolicy(max_attempts=5, initial_interval=5, backoff_factor=2))
@@ -1399,7 +1464,8 @@ class AnomalyAgent:
             {"implement_tools": "implement_tools", "implement": "implement"},
         )
         workflow.add_conditional_edges("implement_tools", self.post_register_route, {"implement": "implement", "hypothesis": "hypothesis"})
-        workflow.add_edge("hypothesis", "execute")
+        workflow.add_edge("hypothesis", "audit")
+        workflow.add_edge("audit", "execute")
         workflow.add_conditional_edges(
             "execute",
             self.execute_route,
