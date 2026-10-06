@@ -1229,6 +1229,7 @@ class AnomalyAgent:
             output_dir = self.current_output_dir(state, test_success=True)
             out_dir = output_dir / 'result_summary.json'
             data = dict(state.get("current_results", {}) or {})
+            data["audit"] = dict(state.get("audit", {}) or {})
             data.setdefault("saved_test_index", self.next_saved_test_index(state, test_success=True))
             data.setdefault("agent_mode", self.agent_mode)
             data.setdefault("test_name", state.get("current_test_name", ""))
