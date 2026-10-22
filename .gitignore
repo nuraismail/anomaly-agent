@@ -1,6 +1,7 @@
 .env
 CMBAnomalyAgent.ipynb
 cmbanomalyagent.py
+test_names_agent.py
 .vscode
 *__pycache__
 data/input/

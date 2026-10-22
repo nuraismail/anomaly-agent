@@ -12,7 +12,7 @@ template: |
   - Prefer a statistic that is informative but still practical on nside=256 maps.
   - The statistic must be a SINGLE scalar per map, not a vector or tuple of sub-statistics.
   - Avoid peak catalogues, Minkowski functionals, KS tests over multiple derived quantities, or any test that naturally produces several outputs.
-  - Prefer cheap single-number summaries such as low-l power asymmetries, masked regional moments, parity asymmetry, hemispherical contrasts, or simple alignment statistics.
+  - Prefer cheap single-number statistics that can be computed quickly on a large number of maps.
   - Rotate across anomaly families. If a family is blocked or discouraged, follow that guidance.
   - Do not restate previous summaries verbatim.
   - The downstream executor will already harmonise resolution, convert Planck units to microK, and apply the Planck mask.
@@ -21,10 +21,6 @@ template: |
   PREVIOUS TEST NAMES:
 
   {tested}
-
-  COMPACT PRIOR CATALOG:
-
-  {prior_catalog_text}
 
   RECENT REJECTED PROPOSALS:
 
@@ -48,3 +44,7 @@ template: |
 
   TEST_NAME: <short title>
   DESCRIPTION: <clear method description with enough detail for implementation>
+
+# COMPACT PRIOR CATALOG:
+
+# {prior_catalog_text}

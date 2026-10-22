@@ -123,6 +123,7 @@ class AnomalyAgent:
         self.planner_prompt_path = file_paths.planner_dir
         self.implement_prompt_path = file_paths.implement_dir
         self.hypothesis_prompt_path = file_paths.hypothesis_dir
+        self.audit_prompt_path = file_paths.audit_dir
         self.summary_prompt_path = file_paths.summary_dir
         self.allow_search_tools = True
         self.observed_map_label = "Planck map"
@@ -278,6 +279,8 @@ class AnomalyAgent:
         test_hypothesis: Annotated[list[AnyMessage], add_messages]
         test_type: Annotated[list[AnyMessage], add_messages]
         justification: Annotated[list[AnyMessage], add_messages]
+        audit: dict
+        test_signature: dict
         execution_output: Annotated[list[AnyMessage], add_messages]
         test_summary: Annotated[list[AnyMessage], add_messages]
         search_query: Annotated[list[AnyMessage], add_messages]
@@ -600,6 +603,9 @@ class AnomalyAgent:
             test_config=self.test_config,
         )
 
+        test_signature = state["test_signature"]
+        test_signature["tokens"] = extract_test_signature(state["current_test_name"], state["current_test_description"])["tokens"]
+
         result_payload = {
             "saved_test_index": saved_test_index,
             "agent_mode": self.agent_mode,
@@ -621,7 +627,7 @@ class AnomalyAgent:
             "output_dir": str(output_dir),
             "custom_summary": self.to_python_types(extra_summary),
             "analysis_code": state["code"][-1].content if state.get("code") else None,
-            "test_signature": extract_test_signature(state["current_test_name"], state["current_test_description"]),
+            "test_signature": test_signature,
         }
 
         self.python_env["last_error"] = None
@@ -801,7 +807,7 @@ class AnomalyAgent:
         search_count = runtime.state.get("search_count", 0)
 
         try:
-            results = DuckDuckGoSearchResults(num_results=5).run(query)
+            results = DuckDuckGoSearchResults(num_results=5, results_separator='\n\n').run(query)
             results_text = 'Query: ' + query + '\n\n' + 'Results:\n\n' + results + '\n'
             tool_message = "Success"
         except Exception as exc:
@@ -909,56 +915,21 @@ class AnomalyAgent:
         msg_text = message_content_to_text(msg.content)
         if (not getattr(msg, "tool_calls", None) and (("tool_calls" in msg_text or "query:" in msg_text) or msg_text == '')) or getattr(msg, "invalid_tool_calls", None):
             return {"node_retry": True}
-        else:
-            test_name, test_description = parse_test_metadata(msg_text)
-            rotation_issue = family_rotation_check(self.test_output_dir, self.test_config, test_name, test_description)
-            novelty_issue = novelty_check(self.test_output_dir, test_name, test_description)
-            feedback_parts = []
 
-        if rotation_issue is None and novelty_issue is None:
-            return {
-                "messages": [msg],
-                "current_test_name": test_name,
-                "current_test_description": test_description,
-                "search_count": 0,
-                "node_retry": False
-            }
-        if rotation_issue is not None:
-            if rotation_issue["severity"] == "blocked":
-                feedback_parts.append(
-                    "REJECTED FOR FAMILY OVERUSE:\n"
-                    f"- {rotation_issue['message']}\n"
-                    "- Choose a different anomaly family for the next proposal."
-                )
-            else:
-                feedback_parts.append(
-                    "REJECTED FOR FAMILY REPETITION:\n"
-                    f"- {rotation_issue['message']}\n"
-                    "- Prefer a different family unless you can make the proposal clearly distinct."
-                )
-        if novelty_issue is not None:
-            feedback_parts.append(
-                "REJECTED FOR REPETITION:\n"
-                f"- Your last proposal was too similar to prior test '{novelty_issue['prior_name']}'.\n"
-                f"- Prior families: {', '.join(novelty_issue['families'])}. "
-                f"Similarity score: {novelty_issue['score']:.2f}.\n"
-                "- Propose a substantively different test, ideally from a different anomaly family and with a different statistic form.\n"
-                "- Do not make a cosmetic rename of the same dipole/quadrupole/octupole cross-correlation or power-asymmetry template."
-            )
-
-        planner_feedback = "\n\n".join(feedback_parts)
-        self.persist_rejected_proposal(
-            state,
-            test_name,
-            test_description,
-            rotation_issue,
-            novelty_issue,
-            planner_feedback,
-        )
+        stop_markers = [
+            "TEST_NAME",
+            "DESCRIPTION",
+        ]
+        test_dict = text_to_dict(msg_text, stop_markers)
+        test_name = test_dict.get("TEST_NAME", "").strip()
+        test_description = test_dict.get("DESCRIPTION", "").strip()
 
         return {
-            "messages": [AIMessage(content=planner_feedback)],
-            "node_retry": True,
+            "messages": [msg],
+            "current_test_name": test_name,
+            "current_test_description": test_description,
+            "search_count": 0,
+            "node_retry": False
         }
     
     def implement_node(self, state: State):
@@ -1028,6 +999,125 @@ class AnomalyAgent:
                 "test_hypothesis": [test_dict["HYPOTHESIS"]],
                 "test_type": [test_dict["TEST_TYPE"]],
                 "justification": [test_dict["JUSTIFICATION"]]}
+
+    def audit_node(self, state: State):
+        test_name = state["current_test_name"]
+        test_description = state["current_test_description"]
+
+        test_hypothesis = state["test_hypothesis"][-1].content
+        test_type = state["test_type"][-1].content
+        code = self.retrieve_state(state, "code", max_entries=1)
+
+        # rejected proposals contain proposal/rejection information only, they do not contain the statistical results of executed tests
+        rejected_proposals_text = compact_rejected_proposals_text(
+            self.test_output_dir
+        )
+
+        with open(self.audit_prompt_path) as stream:
+            file = yaml.safe_load(stream)
+            template = file["template"]
+
+        prompt = PromptTemplate.from_template(template)
+        prompt = prompt.format_prompt(
+            test_name=test_name,
+            test_description=test_description,
+            test_hypothesis=test_hypothesis,
+            test_type=test_type,
+            code=code,
+            rejected_proposals_text=rejected_proposals_text,
+        )
+
+        print("\n##### AUDIT PROMPT #####\n")
+        print(prompt.to_string())
+
+        msg = self.llm.invoke(prompt)
+
+        message = message_content_to_text(msg.content)
+
+        stop_markers = [
+            "P_HACKING_RISK",
+            "ANALYSIS_FLEXIBILITY",
+            "POTENTIAL_SELECTION_PATHS",
+            "EVIDENCE_OF_OUTCOME_DEPENDENT_SELECTION",
+            "ASSESSMENT",
+            "FAMILY",
+            "STAT_FORM",
+            "COMPONENT"
+        ]
+
+        audit_dict = text_to_dict(message, stop_markers)
+
+        audit = {
+            "p_hacking_risk": audit_dict.get("P_HACKING_RISK", ""),
+            "analysis_flexibility": audit_dict.get("ANALYSIS_FLEXIBILITY", ""),
+            "potential_selection_paths": audit_dict.get(
+                "POTENTIAL_SELECTION_PATHS", ""
+            ),
+            "evidence_of_outcome_dependent_selection": audit_dict.get(
+                "EVIDENCE_OF_OUTCOME_DEPENDENT_SELECTION", ""
+            ),
+            "assessment": audit_dict.get("ASSESSMENT", ""),
+        }
+
+        signature = {
+            "family": audit_dict.get("FAMILY", "").split(', ')[0],
+            "families": audit_dict.get("FAMILY", ""),
+            "stat_form": audit_dict.get("STAT_FORM", ""),
+            "components": audit_dict.get("COMPONENT", ""),
+        }
+
+        test_name = state.get("current_test_name")
+        test_description = state.get("current_test_description")
+        rotation_issue = family_rotation_check(self.test_output_dir, signature, self.test_config)
+        novelty_issue = novelty_check(self.test_output_dir, signature, test_name, test_description)
+        feedback_parts = []
+
+        if rotation_issue is None and novelty_issue is None:
+            return {
+                "messages": [msg],
+                "audit": audit,
+                "test_signature": signature
+            }
+        if rotation_issue is not None:
+            if rotation_issue["severity"] == "blocked":
+                feedback_parts.append(
+                    "REJECTED FOR FAMILY OVERUSE:\n"
+                    f"- {rotation_issue['message']}\n"
+                    "- Choose a different anomaly family for the next proposal."
+                )
+            else:
+                feedback_parts.append(
+                    "REJECTED FOR FAMILY REPETITION:\n"
+                    f"- {rotation_issue['message']}\n"
+                    "- Prefer a different family unless you can make the proposal clearly distinct.\n"
+                )
+        if novelty_issue is not None:
+            feedback_parts.append(
+                "REJECTED FOR REPETITION:\n"
+                f"- Your last proposal was too similar to prior test '{novelty_issue['prior_name']}'.\n"
+                f"- Prior families: {novelty_issue['families']}. "
+                f"Similarity score: {novelty_issue['score']:.2f}.\n"
+                "- Propose a substantively different test, ideally from a different anomaly family and with a different statistic form.\n"
+                "- Do not make a cosmetic rename of the same dipole/quadrupole/octupole cross-correlation or power-asymmetry template.\n"
+            )
+        if "high" in str(audit["p_hacking_risk"]).lower():
+            feedback_parts.append(
+                "REJECTED FOR P-HACKING RISK:\n"
+                "Ensure that the test is designed without selecting parameters such that a known outcome occurs." )
+
+        planner_feedback = "\n\n".join(feedback_parts)
+        self.persist_rejected_proposal(
+            state,
+            test_name,
+            test_description,
+            rotation_issue,
+            novelty_issue,
+            planner_feedback,
+        )
+
+        return {
+            "messages": [AIMessage(content=planner_feedback)],
+        }
     
     def execute_node(self, state: State):
         output = self.run_registered_analysis(state)
@@ -1143,6 +1233,12 @@ class AnomalyAgent:
         else:
             return "hypothesis"
 
+    def audit_route(self, state: State):
+        if "REJECTED FOR" in str(state["messages"][-1].content):
+            return "planner"
+        else:
+            return "execute"
+
     def execute_route(self, state: State):
         if state.get("node_retry"):
             return "implement"
@@ -1166,6 +1262,7 @@ class AnomalyAgent:
             output_dir = self.current_output_dir(state, test_success=True)
             out_dir = output_dir / 'result_summary.json'
             data = dict(state.get("current_results", {}) or {})
+            data["audit"] = dict(state.get("audit", {}) or {})
             data.setdefault("saved_test_index", self.next_saved_test_index(state, test_success=True))
             data.setdefault("agent_mode", self.agent_mode)
             data.setdefault("test_name", state.get("current_test_name", ""))
@@ -1233,6 +1330,7 @@ class AnomalyAgent:
             "current_results": {},
             "current_test_name": "",
             "current_test_description": "",
+            "audit": {},
             "node_retry": False,
             "search_results": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
         }
@@ -1343,7 +1441,7 @@ class AnomalyAgent:
 
                         is_transient = any(
                             code in error
-                            for code in ["'code': 524", "'code': 500", "'code': 502", "'code': 504", '"code": 524', '"code": 500', '"code": 502', '"code": 504', "Expecting value:"]
+                            for code in ["'code': 524", "'code': 500", "'code': 502", "'code': 504", '"code": 524', '"code": 500', '"code": 502', '"code": 504', 'Expecting value:', 'server_error']
                         )
                         if not is_transient or retry_count <= 0:
                             if "ToolMessage" in error:
@@ -1381,6 +1479,7 @@ class AnomalyAgent:
         workflow.add_node("implement", self.implement_node, retry_policy=RetryPolicy(max_attempts=3, initial_interval=3))
         workflow.add_node("implement_tools", self.implement_tool_node)
         workflow.add_node("hypothesis", self.hypothesis_node)
+        workflow.add_node("audit", self.audit_node, retry_policy=RetryPolicy(max_attempts=3, initial_interval=3))
         workflow.add_node("execute", self.execute_node, retry_policy=RetryPolicy(max_attempts=2, initial_interval=3))
         workflow.add_node("summary", self.summary_node, retry_policy=RetryPolicy(max_attempts=3, initial_interval=5, backoff_factor=2))
         workflow.add_node("summary_tools", self.summary_tool_node, retry_policy=RetryPolicy(max_attempts=5, initial_interval=5, backoff_factor=2))
@@ -1399,7 +1498,12 @@ class AnomalyAgent:
             {"implement_tools": "implement_tools", "implement": "implement"},
         )
         workflow.add_conditional_edges("implement_tools", self.post_register_route, {"implement": "implement", "hypothesis": "hypothesis"})
-        workflow.add_edge("hypothesis", "execute")
+        workflow.add_edge("hypothesis", "audit")
+        workflow.add_conditional_edges(
+            "audit",
+            self.audit_route,
+            {"planner": "planner", "execute": "execute"}
+            )
         workflow.add_conditional_edges(
             "execute",
             self.execute_route,

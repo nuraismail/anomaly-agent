@@ -22,6 +22,7 @@ def normalise_stat_form(stat_form: str) -> str:
 def jaccard_overlap(left, right) -> float:
     left_set = set(left)
     right_set = set(right)
+    # print(f"Jaccard overlap between {left_set} and {right_set}: {len(left_set & right_set)} / {len(left_set | right_set) or 1}")
     if not left_set and not right_set:
         return 0.0
     return len(left_set & right_set) / (len(left_set | right_set) or 1)
@@ -30,52 +31,24 @@ def jaccard_overlap(left, right) -> float:
 def family_labels(entry: dict) -> list[str]:
     families = entry.get("families")
     if families:
-        return list(families)
+        return families.split(', ')
 
     family = entry.get("family", "other")
-    return [family] if family else ["other"]
+    return [family]
 
 
 def extract_test_signature(name: str, description: str):
     text = f"{name} {description}".lower()
-    matched_families = []
-    stat_form = "other"
 
     with open(file_paths.cmb_dict_dir) as stream:
         cmb_dict = yaml.safe_load(stream)
-        families = cmb_dict["families"]
-
-        for f in families:
-            if re.search(rf"\b{re.escape(f)}\b", text):
-                matched_families.append(normalise_family(f))
-
-        stat_forms = list(cmb_dict["stat_forms"])
-        if "coefficent" not in stat_forms:
-            stat_forms.append("coefficent")
-
-        for s in stat_forms:
-            if re.search(rf"\b{re.escape(s)}\b", text):
-                stat_form = normalise_stat_form(s)
-                break
-
-        comps = cmb_dict["comps"]
-        components = []
-
-        for c in comps:
-            if re.search(rf"\b{re.escape(c)}\b", text):
-                components.append(c)
-
+        
     stopwords = cmb_dict["stopwords"]
 
     parts = re.findall(r"[a-z0-9]+", text.lower())
     tokens = [part for part in parts if part not in stopwords and len(part) > 2]
-    families = matched_families or ["other"]
     
     return {
-        "family": families[0],
-        "families": families,
-        "stat_form": stat_form,
-        "components": components,
         "tokens": tokens,
     }
 
@@ -105,10 +78,11 @@ def build_prior_catalog(tests_dir):
         if not name:
             continue
 
-        signature = extract_test_signature(name, description)
+        signature = data["test_signature"]
 
         catalog.append({
             "name": name,
+            "description": description,
             "family": signature["family"],
             "families": signature["families"],
             "stat_form": signature["stat_form"],
@@ -140,8 +114,8 @@ def compact_catalog_text(tests_dir, max_items: int = 12):
     lines.append("Recent tests:")
     
     for entry in catalog[-max_items:]:
-        comp = ", ".join(entry["components"]) if entry["components"] else "none"
-        families = ", ".join(family_labels(entry))
+        comp = entry["components"] if entry["components"] else "none"
+        families = entry["families"] if entry["families"] else entry["family"] if entry["family"] else "none"
         lines.append(
             f"- {entry['name']} | families={families} | form={entry['stat_form']} | components={comp}"
         )
@@ -207,22 +181,22 @@ def blocked_families(tests_dir, test_config:dict):
 
 def rotation_guidance_text(tests_dir, test_config:dict):
     blocked, discouraged = blocked_families(tests_dir, test_config)
-    blocked = [family for family in blocked if family != "other"]
-    discouraged = [family for family in discouraged if family != "other"]
+    blocked = ', '.join([family for family in blocked if family != "other"]) if len(blocked) > 0 and blocked != ["other"] else None
+    discouraged = ', '.join([family for family in discouraged if family != "other"]) if len(discouraged) > 0 and discouraged != ["other"] else None
 
     parts = []
     
     if blocked:
         parts.append(
             "Temporarily blocked families because they are overused: "
-            + ", ".join(blocked)
+            + blocked
             + ". Do not propose tests from these families unless no other scientifically valid family remains."
         )
 
     if discouraged:
         parts.append(
             "Families to avoid unless the proposal is clearly distinct: "
-            + ", ".join(discouraged)
+            + discouraged
             + "."
         )
 
@@ -231,16 +205,16 @@ def rotation_guidance_text(tests_dir, test_config:dict):
     else:
         return "\n".join(parts)
 
-def novelty_check(tests_dir, candidate_name: str, candidate_description: str):
-    candidate = extract_test_signature(candidate_name, candidate_description)
+def novelty_check(tests_dir, candidate_sig: dict, candidate_name: str, candidate_description: str):
+    candidate_tokens = extract_test_signature(candidate_name, candidate_description)
     prior_catalog = build_prior_catalog(tests_dir)
 
     if not prior_catalog:
         return None
 
-    candidate_tokens = set(candidate["tokens"])
-    candidate_families = set(candidate["families"])
-    candidate_components = set(candidate["components"])
+    candidate_tokens = set(candidate_tokens["tokens"])
+    candidate_families = set(candidate_sig["families"].split(', ')).difference({"other"}) if candidate_sig["families"] else set()
+    candidate_components = set(candidate_sig["components"].split(', ')).difference({"other"}) if candidate_sig["components"] else set()
     best = None
     best_score = -1.0
 
@@ -250,12 +224,13 @@ def novelty_check(tests_dir, candidate_name: str, candidate_description: str):
         union = len(candidate_tokens | prior_tokens) or 1
         jaccard = overlap / union
 
-        prior_families = set(family_labels(prior))
-        prior_components = set(prior["components"])
+        prior_families = set(family_labels(prior)).difference({"other"}) if prior["families"] else set()
+        prior_components = set(prior["components"].split(', ')).difference({"other"}) if prior["components"] else set()
         family_overlap = jaccard_overlap(candidate_families, prior_families)
         component_overlap = jaccard_overlap(candidate_components, prior_components)
+        # print(f"Comparing candidate '{candidate_name}' with prior '{prior['name']}': jaccard={jaccard:.2f}, family_overlap={family_overlap:.2f}, component_overlap={component_overlap:.2f}")
         same_family = family_overlap > 0.0
-        same_form = candidate["stat_form"] == prior["stat_form"]
+        same_form = candidate_sig["stat_form"] == prior["stat_form"]
         same_components = component_overlap == 1.0 and bool(candidate_components)
 
         score = jaccard
@@ -271,6 +246,7 @@ def novelty_check(tests_dir, candidate_name: str, candidate_description: str):
             best_score = score
             best = {
                 "prior_name": prior["name"],
+                "prior_description": prior["description"],
                 "score": score,
                 "jaccard": jaccard,
                 "family_overlap": family_overlap,
@@ -283,23 +259,24 @@ def novelty_check(tests_dir, candidate_name: str, candidate_description: str):
                 "families": family_labels(prior),
             }
 
+    # print(f"Best match for {candidate_name}: {best['prior_name']} with score {best['score']:.2f} and jaccard {best['jaccard']:.2f}")
+
     if best and (best["score"] >= 0.75 or (best["same_family"] and best["jaccard"] >= 0.45)):
         return best
     else:
         return None
 
-def family_rotation_check(tests_dir, test_config:dict, candidate_name: str, candidate_description: str):
-    signature = extract_test_signature(candidate_name, candidate_description)
+def family_rotation_check(tests_dir, candidate_sig: dict, test_config:dict):
     blocked, discouraged = blocked_families(tests_dir, test_config)
-    candidate_families = set(signature["families"]) - {"other"}
+    candidate_families = set(candidate_sig["families"]) - {"other"}
     blocked_families_for_candidate = sorted(candidate_families & set(blocked))
     discouraged_families_for_candidate = sorted(candidate_families & set(discouraged))
 
     if blocked_families_for_candidate:
         blocked = [family for family in blocked if family != "other"]
         return {
-            "family": signature["family"],
-            "families": signature["families"],
+            "family": candidate_sig["family"],
+            "families": candidate_sig["families"],
             "matched_families": blocked_families_for_candidate,
             "severity": "blocked",
             "message": f"The following anomaly families have reached the hard cap and are temporarily blocked: {str(blocked)}"
@@ -307,8 +284,8 @@ def family_rotation_check(tests_dir, test_config:dict, candidate_name: str, cand
     elif discouraged_families_for_candidate:
         discouraged = [family for family in discouraged if family != "other"]
         return {
-            "family": signature["family"],
-            "families": signature["families"],
+            "family": candidate_sig["family"],
+            "families": candidate_sig["families"],
             "matched_families": discouraged_families_for_candidate,
             "severity": "discouraged",
             "message": f"The following anomaly families are already heavily used and should be avoided unless the test is genuinely distinct: {str(discouraged)}"
