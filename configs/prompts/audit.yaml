@@ -6,7 +6,9 @@ template: |
   Your task is to assess whether the test definition contains analysis choices
   that could, in principle, have been selected after inspecting the observed CMB
   map, and whether the available proposal history provides evidence that such
-  outcome-dependent selection occurred.
+  outcome-dependent selection occurred. 
+  
+  Also assess the anomaly family, statistical form and component of the test.
 
   IMPORTANT:
   - You are performing a pre-result audit.
@@ -21,7 +23,6 @@ template: |
     procedure. These become a p-hacking concern only if there is evidence that
     alternatives were explored and selected according to the observed result.
   - Do not reject or alter the proposed test.
-  - Do not assess the novelty or anomaly family of the test.
   - Base the assessment only on the supplied test definition, analysis code,
     hypothesis and proposal history.
   - If the available information does not establish outcome-dependent selection,
@@ -52,3 +53,7 @@ template: |
   POTENTIAL_SELECTION_PATHS: <describe plausible ways the result could have been tuned, or write None identified>
   EVIDENCE_OF_OUTCOME_DEPENDENT_SELECTION: <None identified, Weak, Moderate or Strong>
   ASSESSMENT: <brief explanation distinguishing potential flexibility from evidence of actual outcome-dependent selection>
+  FAMILY: <one or more of the following, separated by commas>: parity, alignment, correlation, hemispherical, variance, direction, power, other>
+  STAT_FORM: <one of the following: ratio, difference, contrast, coefficient, index, angle, other>
+  COMPONENT: <one of the following: dipole, quadrupole, octupole, ecliptic, galactic, hemisphere, quadrant, other>
+

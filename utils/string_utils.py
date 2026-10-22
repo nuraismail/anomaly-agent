@@ -28,6 +28,8 @@ def message_content_to_text(content) -> str:
             if isinstance(item, dict):
                 if item.get("type") == "text":
                     parts.append(str(item.get("text", "")))
+                if item.get("type") == "reasoning_text" or item.get("type") == "reasoning":
+                    continue
                 elif "text" in item:
                     parts.append(str(item.get("text", "")))
                 elif "content" in item:
